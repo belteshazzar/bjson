@@ -66,26 +66,22 @@ class ObjectId {
     return new Date(timestamp * 1000);
   }
 
+  equals(other) {
+    if (!(other instanceof ObjectId)) {
+      throw new Error('Can only compare with another ObjectId');
+    }
+    return this.id === other.id;
+  }
+
   /**
    * Compares this ObjectId with another for equality
    */
-  equals(other) {
-    if (!other) return false;
-    
-    if (other instanceof ObjectId) {
-      return this.id === other.id;
+  compare(other) {
+    if (!(other instanceof ObjectId)) {
+      throw new Error('Can only compare with another ObjectId');
     }
-    
-    if (typeof other === 'string') {
-      return this.id === other.toLowerCase();
-    }
-    
-    // Handle objects with id property
-    if (other.id) {
-      return this.id === other.id;
-    }
-    
-    return false;
+
+    return this.id.localeCompare(other.id);
   }
 
   /**
