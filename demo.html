@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Binary JSON with OPFS Demo</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    h1 {
+      color: #333;
+    }
+    .container {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .controls {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    .error {
+      background: #f8d7da;
+      color: #721c24;
+      padding: 10px;
+      border-radius: 4px;
+      margin-bottom: 10px;
+    }
+    .success {
+      background: #d4edda;
+      color: #155724;
+      padding: 10px;
+      border-radius: 4px;
+      margin-bottom: 10px;
+    }
+    textarea {
+      width: 100%;
+      min-height: 200px;
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      box-sizing: border-box;
+    }
+    .output {
+      background: #f8f9fa;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      padding: 15px;
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .info {
+      background: #d1ecf1;
+      color: #0c5460;
+      padding: 10px;
+      border-radius: 4px;
+      margin-bottom: 10px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: bold;
+    }
+    input[type="text"] {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      box-sizing: border-box;
+      margin-bottom: 10px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Binary JSON with OPFS Demo</h1>
+  
+  <div class="container">
+    <div class="info">
+      <strong>Note:</strong> This demo requires a browser that supports Origin Private File System (OPFS).
+      Supported browsers include Chrome 102+, Edge 102+, and Opera 88+.
+    </div>
+  </div>
+
+  <div class="container">
+    <h2>File Operations</h2>
+    
+    <div>
+      <label for="filename">Filename:</label>
+      <input type="text" id="filename" value="test.bjson" placeholder="Enter filename">
+    </div>
+
+    <div>
+      <label for="jsonInput">JSON Data to Write:</label>
+      <textarea id="jsonInput" placeholder='Enter JSON data, e.g., {"name": "John", "age": 30}'>{
+  "name": "Test Document",
+  "count": 42,
+  "price": 99.99,
+  "active": true,
+  "tags": ["javascript", "binary", "json"],
+  "metadata": {
+    "created": 1234567890,
+    "updated": null
+  }
+}</textarea>
+    </div>
+
+    <div class="controls">
+      <button onclick="writeFile()">Write to File</button>
+      <button onclick="readFile()">Read from File</button>
+      <button onclick="appendToFile()">Append to File</button>
+      <button onclick="scanFile()">Scan File (Read All Records)</button>
+      <button onclick="deleteFile()">Delete File</button>
+      <button onclick="checkFileExists()">Check if File Exists</button>
+    </div>
+
+    <div id="message"></div>
+
+    <div>
+      <h3>Output:</h3>
+      <div id="output" class="output">No output yet...</div>
+    </div>
+  </div>
+
+  <div class="container">
+    <h2>Encoding/Decoding Demo</h2>
+    
+    <div>
+      <label for="encodeInput">Data to Encode:</label>
+      <textarea id="encodeInput" placeholder='Enter JSON data to encode'>{"test": "value", "number": 42}</textarea>
+    </div>
+
+    <div class="controls">
+      <button onclick="testEncode()">Encode to Binary</button>
+      <button onclick="testDecode()">Decode from Binary</button>
+    </div>
+
+    <div id="encodeMessage"></div>
+
+    <div>
+      <h3>Binary Output (Hex):</h3>
+      <div id="binaryOutput" class="output">No output yet...</div>
+    </div>
+
+    <div>
+      <h3>Decoded Output:</h3>
+      <div id="decodeOutput" class="output">No output yet...</div>
+    </div>
+  </div>
+
+  <div class="container">
+    <h2>Type Byte Reference</h2>
+    <div class="output">
+NULL:   0x00
+FALSE:  0x01
+TRUE:   0x02
+INT:    0x03 (32-bit signed integer, 4 bytes, little-endian)
+FLOAT:  0x04 (64-bit float, 8 bytes, little-endian)
+STRING: 0x05 (length as 32-bit uint + UTF-8 bytes)
+OID:    0x06 (MongoDB ObjectId, 12 bytes)
+ARRAY:  0x10 (length as 32-bit uint + elements)
+OBJECT: 0x11 (num keys as 32-bit uint + key-value pairs)
+    </div>
+  </div>
+
+  <script src="bjson.js"></script>
+  <script>
+    const { ObjectId, encode, decode, BJsonFile } = window.BJson;
+    let currentBinary = null;
+
+    function showMessage(elementId, message, type = 'success') {
+      const element = document.getElementById(elementId);
+      element.innerHTML = `<div class="${type}">${message}</div>`;
+      setTimeout(() => {
+        element.innerHTML = '';
+      }, 5000);
+    }
+
+    function getFilename() {
+      return document.getElementById('filename').value || 'test.bjson';
+    }
+
+    async function writeFile() {
+      try {
+        const jsonInput = document.getElementById('jsonInput').value;
+        const data = JSON.parse(jsonInput);
+        
+        const file = new BJsonFile(getFilename());
+        await file.write(data);
+        
+        showMessage('message', `Successfully wrote data to ${getFilename()}`);
+        document.getElementById('output').textContent = 'Data written to file successfully!';
+      } catch (error) {
+        showMessage('message', `Error: ${error.message}`, 'error');
+        console.error(error);
+      }
+    }
+
+    async function readFile() {
+      try {
+        const file = new BJsonFile(getFilename());
+        const data = await file.read();
+        
+        showMessage('message', `Successfully read data from ${getFilename()}`);
+        document.getElementById('output').textContent = JSON.stringify(data, null, 2);
+      } catch (error) {
+        showMessage('message', `Error: ${error.message}`, 'error');
+        console.error(error);
+      }
+    }
+
+    async function appendToFile() {
+      try {
+        const jsonInput = document.getElementById('jsonInput').value;
+        const data = JSON.parse(jsonInput);
+        
+        const file = new BJsonFile(getFilename());
+        await file.append(data);
+        
+        showMessage('message', `Successfully appended data to ${getFilename()}`);
+        document.getElementById('output').textContent = 'Data appended to file successfully!';
+      } catch (error) {
+        showMessage('message', `Error: ${error.message}`, 'error');
+        console.error(error);
+      }
+    }
+
+    async function scanFile() {
+      try {
+        const file = new BJsonFile(getFilename());
+        const records = [];
+        
+        for await (const record of file.scan()) {
+          records.push(record);
+        }
+        
+        showMessage('message', `Successfully scanned ${records.length} record(s) from ${getFilename()}`);
+        document.getElementById('output').textContent = JSON.stringify(records, null, 2);
+      } catch (error) {
+        showMessage('message', `Error: ${error.message}`, 'error');
+        console.error(error);
+      }
+    }
+
+    async function deleteFile() {
+      try {
+        const file = new BJsonFile(getFilename());
+        await file.delete();
+        
+        showMessage('message', `Successfully deleted ${getFilename()}`);
+        document.getElementById('output').textContent = 'File deleted successfully!';
+      } catch (error) {
+        showMessage('message', `Error: ${error.message}`, 'error');
+        console.error(error);
+      }
+    }
+
+    async function checkFileExists() {
+      try {
+        const file = new BJsonFile(getFilename());
+        const exists = await file.exists();
+        
+        showMessage('message', `File ${getFilename()} ${exists ? 'exists' : 'does not exist'}`);
+        document.getElementById('output').textContent = `File exists: ${exists}`;
+      } catch (error) {
+        showMessage('message', `Error: ${error.message}`, 'error');
+        console.error(error);
+      }
+    }
+
+    function testEncode() {
+      try {
+        const input = document.getElementById('encodeInput').value;
+        const data = JSON.parse(input);
+        
+        currentBinary = encode(data);
+        
+        // Convert to hex string for display
+        const hexString = Array.from(currentBinary)
+          .map(b => b.toString(16).padStart(2, '0'))
+          .join(' ');
+        
+        document.getElementById('binaryOutput').textContent = 
+          `Length: ${currentBinary.length} bytes\n\nHex:\n${hexString}`;
+        
+        showMessage('encodeMessage', 'Successfully encoded data to binary');
+      } catch (error) {
+        showMessage('encodeMessage', `Error: ${error.message}`, 'error');
+        console.error(error);
+      }
+    }
+
+    function testDecode() {
+      try {
+        if (!currentBinary) {
+          showMessage('encodeMessage', 'Please encode data first', 'error');
+          return;
+        }
+        
+        const decoded = decode(currentBinary);
+        document.getElementById('decodeOutput').textContent = JSON.stringify(decoded, null, 2);
+        
+        showMessage('encodeMessage', 'Successfully decoded binary data');
+      } catch (error) {
+        showMessage('encodeMessage', `Error: ${error.message}`, 'error');
+        console.error(error);
+      }
+    }
+
+    // Check OPFS support on load
+    window.addEventListener('load', () => {
+      if (!navigator.storage || !navigator.storage.getDirectory) {
+        showMessage('message', 
+          'Origin Private File System (OPFS) is not supported in this browser. Please use Chrome 102+, Edge 102+, or Opera 88+.', 
+          'error'
+        );
+      }
+    });
+  </script>
+</body>
+</html>
