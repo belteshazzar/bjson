@@ -34,7 +34,7 @@ class ObjectId {
   toBytes() {
     const bytes = new Uint8Array(12);
     for (let i = 0; i < 12; i++) {
-      bytes[i] = parseInt(this.value.substr(i * 2, 2), 16);
+      bytes[i] = parseInt(this.value.substring(i * 2, i * 2 + 2), 16);
     }
     return bytes;
   }
@@ -361,14 +361,6 @@ class BJsonFile {
       
       // Scan through and yield each top-level value
       while (offset < data.length) {
-        const startOffset = offset;
-        
-        // We need to decode to know how much data to consume
-        // Store the offset before decoding
-        const beforeOffset = offset;
-        
-        // Create a temporary decoder
-        let tempOffset = offset;
         function getValueSize(dataView, startPos) {
           let pos = startPos;
           if (pos >= dataView.length) return 0;
