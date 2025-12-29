@@ -13,6 +13,7 @@ const TYPE = {
   FLOAT: 0x04,
   STRING: 0x05,
   OID: 0x06,
+  DATE: 0x07,
   ARRAY: 0x10,
   OBJECT: 0x11
 };
@@ -64,6 +65,12 @@ function encode(value) {
     } else if (val instanceof ObjectId) {
       buffers.push(new Uint8Array([TYPE.OID]));
       buffers.push(val.toBytes());
+    } else if (val instanceof Date) {
+      buffers.push(new Uint8Array([TYPE.DATE]));
+      const buffer = new ArrayBuffer(8);
+      const view = new DataView(buffer);
+      view.setBigInt64(0, BigInt(val.getTime()), true); // little-endian
+      buffers.push(new Uint8Array(buffer));
     } else if (typeof val === 'number') {
       if (Number.isInteger(val) && val >= -2147483648 && val <= 2147483647) {
         // 32-bit signed integer
@@ -205,6 +212,16 @@ function decode(data) {
         const oidBytes = data.slice(offset, offset + 12);
         offset += 12;
         return new ObjectId(oidBytes);
+      }
+      
+      case TYPE.DATE: {
+        if (offset + 8 > data.length) {
+          throw new Error('Unexpected end of data for DATE');
+        }
+        const view = new DataView(data.buffer, data.byteOffset + offset, 8);
+        const timestamp = view.getBigInt64(0, true);
+        offset += 8;
+        return new Date(Number(timestamp));
       }
       
       case TYPE.ARRAY: {
@@ -382,6 +399,9 @@ class BJsonFile {
             case TYPE.OID:
               return 1 + 12;
             
+            case TYPE.DATE:
+              return 1 + 8;
+            
             case TYPE.STRING: {
               const lengthView = new DataView(dataView.buffer, dataView.byteOffset + pos, 4);
               const length = lengthView.getUint32(0, true);
@@ -467,24 +487,10 @@ class BJsonFile {
   }
 }
 
-// Export for browser and Node.js environments
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = {
-    TYPE,
-    ObjectId,
-    encode,
-    decode,
-    BJsonFile
-  };
-}
-
-// Also export for ES modules
-if (typeof window !== 'undefined') {
-  window.BJson = {
-    TYPE,
-    ObjectId,
-    encode,
-    decode,
-    BJsonFile
-  };
-}
+export {
+  TYPE,
+  ObjectId,
+  encode,
+  decode,
+  BJsonFile
+};

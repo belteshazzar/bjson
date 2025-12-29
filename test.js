@@ -2,7 +2,7 @@
  * Test suite for bjson encoder/decoder
  */
 
-const { TYPE, ObjectId, encode, decode, BJsonFile } = require('./bjson.js');
+import { TYPE, ObjectId, encode, decode, BJsonFile } from './bjson.js';
 
 // Test counter
 let passed = 0;
@@ -136,6 +136,22 @@ assertEqual(decodedOid.toString(), '507f1f77bcf86cd799439011', 'OID round-trip')
 assertThrows(() => new ObjectId('invalid'), 'Invalid ObjectId throws error');
 assert(ObjectId.isValid('507f1f77bcf86cd799439011'), 'ObjectId.isValid returns true for valid');
 assert(!ObjectId.isValid('invalid'), 'ObjectId.isValid returns false for invalid');
+
+// Test DATE
+console.log('\n--- Testing DATE ---');
+const date = new Date('2023-01-15T12:30:45.000Z');
+const dateEncoded = encode(date);
+assert(dateEncoded.length === 9, 'DATE encoded to 9 bytes (1 type + 8 data)');
+assert(dateEncoded[0] === TYPE.DATE, 'DATE has correct type byte');
+const decodedDate = decode(dateEncoded);
+assert(decodedDate instanceof Date, 'Decoded DATE is Date instance');
+assertEqual(decodedDate.getTime(), date.getTime(), 'DATE round-trip');
+
+const epochDate = new Date(0);
+assertEqual(decode(encode(epochDate)).getTime(), 0, 'DATE round-trip (epoch)');
+
+const futureDate = new Date('2099-12-31T23:59:59.999Z');
+assertEqual(decode(encode(futureDate)).getTime(), futureDate.getTime(), 'DATE round-trip (future)');
 
 // Test ARRAY
 console.log('\n--- Testing ARRAY ---');

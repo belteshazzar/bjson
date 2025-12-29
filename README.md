@@ -16,17 +16,18 @@ A compact binary encoding format for JSON data with support for Origin Private F
 
 The library uses the following byte values for encoding JSON types:
 
-| Type   | Byte Value | Data Format                                    |
-|--------|-----------|------------------------------------------------|
-| NULL   | 0x00      | No additional data                             |
-| FALSE  | 0x01      | No additional data                             |
-| TRUE   | 0x02      | No additional data                             |
-| INT    | 0x03      | 4 bytes (32-bit signed integer, little-endian) |
-| FLOAT  | 0x04      | 8 bytes (64-bit float, little-endian)          |
-| STRING | 0x05      | 4-byte length + UTF-8 encoded bytes            |
-| OID    | 0x06      | 12 bytes (MongoDB ObjectId)                    |
-| ARRAY  | 0x10      | 4-byte length + encoded elements               |
-| OBJECT | 0x11      | 4-byte count + key-value pairs                 |
+| Type   | Byte Value | Data Format                                          |
+|--------|-----------|------------------------------------------------------|
+| NULL   | 0x00      | No additional data                                   |
+| FALSE  | 0x01      | No additional data                                   |
+| TRUE   | 0x02      | No additional data                                   |
+| INT    | 0x03      | 4 bytes (32-bit signed integer, little-endian)      |
+| FLOAT  | 0x04      | 8 bytes (64-bit float, little-endian)               |
+| STRING | 0x05      | 4-byte length + UTF-8 encoded bytes                 |
+| OID    | 0x06      | 12 bytes (MongoDB ObjectId)                         |
+| DATE   | 0x07      | 8 bytes (64-bit signed integer milliseconds, little-endian) |
+| ARRAY  | 0x10      | 4-byte length + encoded elements                    |
+| OBJECT | 0x11      | 4-byte count + key-value pairs                      |
 
 ## Installation
 
@@ -74,6 +75,23 @@ const binary = encode(data);
 const decoded = decode(binary);
 
 console.log(decoded._id.toString()); // '507f1f77bcf86cd799439011'
+```
+
+### Using Date Objects
+
+```javascript
+const { encode, decode } = require('./bjson.js');
+
+const data = {
+  timestamp: new Date('2023-01-15T12:30:45Z'),
+  message: 'Hello'
+};
+
+const binary = encode(data);
+const decoded = decode(binary);
+
+console.log(decoded.timestamp); // Date object: 2023-01-15T12:30:45.000Z
+console.log(decoded.message); // 'Hello'
 ```
 
 ### OPFS File Operations (Browser Only)

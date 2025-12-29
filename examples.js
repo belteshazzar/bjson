@@ -2,7 +2,7 @@
  * Example usage of bjson library
  */
 
-const { ObjectId, encode, decode } = require('./bjson.js');
+import { ObjectId, encode, decode } from './bjson.js';
 
 console.log('=== Binary JSON Examples ===\n');
 

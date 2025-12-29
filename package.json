@@ -3,8 +3,10 @@
   "version": "1.0.0",
   "description": "A compact binary encoding format for JSON data with support for Origin Private File System (OPFS) in browsers",
   "main": "bjson.js",
+  "type": "module",
   "scripts": {
-    "test": "node test.js"
+    "test": "node test.js",
+    "serve": "http-server -c-1 ."
   },
   "keywords": [
     "binary",
@@ -17,5 +19,8 @@
     "serialization"
   ],
   "author": "",
-  "license": "MIT"
+  "license": "BSD-2-Clause",
+  "devDependencies": {
+    "http-server": "^14.1.1"
+  }
 }
