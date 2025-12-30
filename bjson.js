@@ -391,6 +391,7 @@ class BJsonFile {
     this.filename = filename;
     this.root = null;
     this.fileHandle = null;
+    this.file = null;
   }
 
   async init() {
@@ -398,10 +399,28 @@ class BJsonFile {
       throw new Error('Origin Private File System (OPFS) is not supported in this browser');
     }
     this.root = await navigator.storage.getDirectory();
+    try {
+      this.fileHandle = await this.root.getFileHandle(this.filename);
+      this.file = await this.fileHandle.getFile();
+    } catch (error) {
+      if (error.name === 'NotFoundError') {
+        throw new Error(`File not found: ${this.filename}`);
+      }
+      throw error;
+    }
+  }
+
+  async readRange(start, length) {
+    const slice = file.slice(start, start + length);
+    const arrayBuffer = await slice.arrayBuffer();
+    return new Uint8Array(arrayBuffer);
+  }
+
+  async getFileSize() {
+    return file.size;
   }
 
   async write(data) {
-    await this.init();
     
     // Encode data to binary
     const binaryData = encode(data);
@@ -421,15 +440,14 @@ class BJsonFile {
     await this.init();
     
     try {
-      // Get file handle
-      this.fileHandle = await this.root.getFileHandle(this.filename);
+      const fileSize = await this.getFileSize();
       
-      // Get file
-      const file = await this.fileHandle.getFile();
+      if (fileSize === 0) {
+        throw new Error(`File is empty: ${this.filename}`);
+      }
       
-      // Read as array buffer
-      const arrayBuffer = await file.arrayBuffer();
-      const binaryData = new Uint8Array(arrayBuffer);
+      // Read the entire file using readRange
+      const binaryData = await this.readRange(0, fileSize);
       
       // Decode and return
       return decode(binaryData);
@@ -469,25 +487,22 @@ class BJsonFile {
     await this.init();
     
     try {
-      // Get file handle
-      this.fileHandle = await this.root.getFileHandle(this.filename);
+      const fileSize = await this.getFileSize();
       
-      // Get file
-      const file = await this.fileHandle.getFile();
-      
-      // Read as array buffer
-      const arrayBuffer = await file.arrayBuffer();
-      const data = new Uint8Array(arrayBuffer);
+      if (fileSize === 0) {
+        return;
+      }
       
       let offset = 0;
       
       // Scan through and yield each top-level value
-      while (offset < data.length) {
-        function getValueSize(dataView, startPos) {
-          let pos = startPos;
-          if (pos >= dataView.length) return 0;
-          
-          const type = dataView[pos++];
+      while (offset < fileSize) {
+        // Helper function to determine how many bytes a value occupies
+        const getValueSize = async (readPosition) => {
+          // Read 1 byte for type
+          let tempData = await this.readRange(readPosition, 1);
+          let pos = 1;
+          const type = tempData[0];
           
           switch (type) {
             case TYPE.NULL:
@@ -508,39 +523,49 @@ class BJsonFile {
               return 1 + 8;
             
             case TYPE.STRING: {
-              const lengthView = new DataView(dataView.buffer, dataView.byteOffset + pos, 4);
-              const length = lengthView.getUint32(0, true);
+              // Read length (4 bytes)
+              tempData = await this.readRange(readPosition + 1, 4);
+              const view = new DataView(tempData.buffer, tempData.byteOffset, 4);
+              const length = view.getUint32(0, true);
               return 1 + 4 + length;
             }
             
             case TYPE.ARRAY: {
+              // Read array length (4 bytes)
+              tempData = await this.readRange(readPosition + 1, 4);
+              const view = new DataView(tempData.buffer, tempData.byteOffset, 4);
+              const length = view.getUint32(0, true);
               let size = 1 + 4; // type + length
-              const lengthView = new DataView(dataView.buffer, dataView.byteOffset + pos, 4);
-              const length = lengthView.getUint32(0, true);
-              pos += 4;
+              let elementPos = readPosition + 5;
+              
               for (let i = 0; i < length; i++) {
-                const elementSize = getValueSize(dataView, pos);
+                const elementSize = await getValueSize(elementPos);
                 size += elementSize;
-                pos += elementSize;
+                elementPos += elementSize;
               }
               return size;
             }
             
             case TYPE.OBJECT: {
+              // Read number of keys (4 bytes)
+              tempData = await this.readRange(readPosition + 1, 4);
+              const view = new DataView(tempData.buffer, tempData.byteOffset, 4);
+              const numKeys = view.getUint32(0, true);
               let size = 1 + 4; // type + length
-              const lengthView = new DataView(dataView.buffer, dataView.byteOffset + pos, 4);
-              const numKeys = lengthView.getUint32(0, true);
-              pos += 4;
+              let keyPos = readPosition + 5;
+              
               for (let i = 0; i < numKeys; i++) {
-                // Key length + key
-                const keyLengthView = new DataView(dataView.buffer, dataView.byteOffset + pos, 4);
-                const keyLength = keyLengthView.getUint32(0, true);
+                // Read key length (4 bytes)
+                tempData = await this.readRange(keyPos, 4);
+                const keyView = new DataView(tempData.buffer, tempData.byteOffset, 4);
+                const keyLength = keyView.getUint32(0, true);
                 size += 4 + keyLength;
-                pos += 4 + keyLength;
-                // Value
-                const valueSize = getValueSize(dataView, pos);
+                keyPos += 4 + keyLength;
+                
+                // Read value size
+                const valueSize = await getValueSize(keyPos);
                 size += valueSize;
-                pos += valueSize;
+                keyPos += valueSize;
               }
               return size;
             }
@@ -548,10 +573,13 @@ class BJsonFile {
             default:
               throw new Error(`Unknown type byte: 0x${type.toString(16)}`);
           }
-        }
+        };
         
-        const valueSize = getValueSize(data, offset);
-        const valueData = data.slice(offset, offset + valueSize);
+        // Determine size of the current value
+        const valueSize = await getValueSize(offset);
+        
+        // Read only the bytes needed for this value
+        const valueData = await this.readRange(offset, valueSize);
         offset += valueSize;
         
         // Decode and yield this value
