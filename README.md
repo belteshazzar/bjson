@@ -27,7 +27,7 @@ The library uses the following byte values for encoding JSON types:
 | STRING  | 0x05      | 4-byte length + UTF-8 encoded bytes                 |
 | OID     | 0x06      | 12 bytes (MongoDB ObjectId)                         |
 | DATE    | 0x07      | 8 bytes (64-bit signed integer milliseconds, little-endian) |
-| POINTER | 0x08      | 8 bytes (64-bit signed integer file offset, little-endian) |
+| POINTER | 0x08      | 8 bytes (64-bit non-negative integer file offset, little-endian) |
 | ARRAY   | 0x10      | 4-byte length + encoded elements                    |
 | OBJECT  | 0x11      | 4-byte count + key-value pairs                      |
 

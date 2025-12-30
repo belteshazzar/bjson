@@ -167,8 +167,11 @@ class Pointer {
     if (typeof offset !== 'number') {
       throw new Error('Pointer offset must be a number');
     }
-    if (!Number.isInteger(offset) || offset < 0) {
-      throw new Error('Pointer offset must be a non-negative integer');
+    if (!Number.isInteger(offset)) {
+      throw new Error('Pointer offset must be an integer');
+    }
+    if (offset < 0) {
+      throw new Error('Pointer offset must be non-negative');
     }
     if (offset > Number.MAX_SAFE_INTEGER) {
       throw new Error('Pointer offset exceeds maximum safe integer');
@@ -209,7 +212,7 @@ class Pointer {
    */
   equals(other) {
     if (!(other instanceof Pointer)) {
-      throw new Error('Can only compare with another Pointer');
+      return false;
     }
     return this.offset === other.offset;
   }
@@ -403,6 +406,10 @@ function decode(data) {
         const view = new DataView(data.buffer, data.byteOffset + offset, 8);
         const pointerOffset = view.getBigInt64(0, true);
         offset += 8;
+        // Validate offset is within safe integer range
+        if (pointerOffset < 0n || pointerOffset > BigInt(Number.MAX_SAFE_INTEGER)) {
+          throw new Error('Pointer offset out of valid range');
+        }
         return new Pointer(Number(pointerOffset));
       }
       

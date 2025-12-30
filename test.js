@@ -175,6 +175,13 @@ assertThrows(() => new Pointer(-1), 'Negative offset throws error');
 assertThrows(() => new Pointer('invalid'), 'Non-number offset throws error');
 assertThrows(() => new Pointer(3.14), 'Non-integer offset throws error');
 
+const pointer1 = new Pointer(100);
+const pointer2 = new Pointer(100);
+const pointer3 = new Pointer(200);
+assert(pointer1.equals(pointer2), 'Pointer equals() returns true for equal pointers');
+assert(!pointer1.equals(pointer3), 'Pointer equals() returns false for different pointers');
+assert(!pointer1.equals({}), 'Pointer equals() returns false for non-Pointer objects');
+
 // Test ARRAY
 console.log('\n--- Testing ARRAY ---');
 const arrayEncoded = encode([1, 2, 3]);

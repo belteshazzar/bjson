@@ -162,7 +162,7 @@
       <strong>Supported special types:</strong><br>
       • <code>ObjectId("507f1f77bcf86cd799439011")</code> - MongoDB ObjectId<br>
       • <code>Date("2023-01-15T12:30:45Z")</code> - ISO date string<br>
-      • <code>Pointer(2048)</code> - File offset pointer (64-bit unsigned integer)
+      • <code>Pointer(2048)</code> - File offset pointer (non-negative 64-bit integer)
     </div>
     
     <div>
@@ -199,7 +199,7 @@ FLOAT:   0x04 (64-bit float, 8 bytes, little-endian)
 STRING:  0x05 (length as 32-bit uint + UTF-8 bytes)
 OID:     0x06 (MongoDB ObjectId, 12 bytes)
 DATE:    0x07 (64-bit signed integer, milliseconds since epoch)
-POINTER: 0x08 (64-bit signed integer, file offset)
+POINTER: 0x08 (64-bit non-negative integer, file offset)
 ARRAY:   0x10 (length as 32-bit uint + elements)
 OBJECT:  0x11 (num keys as 32-bit uint + key-value pairs)
     </div>
