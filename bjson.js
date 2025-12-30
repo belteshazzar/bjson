@@ -14,6 +14,7 @@ const TYPE = {
   STRING: 0x05,
   OID: 0x06,
   DATE: 0x07,
+  POINTER: 0x08,
   ARRAY: 0x10,
   OBJECT: 0x11
 };
@@ -155,6 +156,66 @@ class ObjectId {
 }
 
 /**
+ * Pointer class - represents a 64-bit file offset pointer
+ * Used to store file offsets for referenced data structures
+ */
+class Pointer {
+  constructor(offset) {
+    if (offset === undefined || offset === null) {
+      throw new Error('Pointer offset must be a number');
+    }
+    if (typeof offset !== 'number') {
+      throw new Error('Pointer offset must be a number');
+    }
+    if (!Number.isInteger(offset) || offset < 0) {
+      throw new Error('Pointer offset must be a non-negative integer');
+    }
+    if (offset > Number.MAX_SAFE_INTEGER) {
+      throw new Error('Pointer offset exceeds maximum safe integer');
+    }
+    this.offset = offset;
+  }
+
+  /**
+   * Returns the pointer offset as a number
+   */
+  valueOf() {
+    return this.offset;
+  }
+
+  /**
+   * Returns the pointer offset as a string
+   */
+  toString() {
+    return this.offset.toString();
+  }
+
+  /**
+   * Returns the pointer in JSON format (as number)
+   */
+  toJSON() {
+    return this.offset;
+  }
+
+  /**
+   * Custom inspect for Node.js console.log
+   */
+  inspect() {
+    return `Pointer(${this.offset})`;
+  }
+
+  /**
+   * Compares this Pointer with another for equality
+   */
+  equals(other) {
+    if (!(other instanceof Pointer)) {
+      throw new Error('Can only compare with another Pointer');
+    }
+    return this.offset === other.offset;
+  }
+}
+
+/**
  * Encode a JavaScript value to binary format
  */
 function encode(value) {
@@ -175,6 +236,12 @@ function encode(value) {
       const buffer = new ArrayBuffer(8);
       const view = new DataView(buffer);
       view.setBigInt64(0, BigInt(val.getTime()), true); // little-endian
+      buffers.push(new Uint8Array(buffer));
+    } else if (val instanceof Pointer) {
+      buffers.push(new Uint8Array([TYPE.POINTER]));
+      const buffer = new ArrayBuffer(8);
+      const view = new DataView(buffer);
+      view.setBigInt64(0, BigInt(val.offset), true); // little-endian
       buffers.push(new Uint8Array(buffer));
     } else if (typeof val === 'number') {
       if (Number.isInteger(val) && val >= -2147483648 && val <= 2147483647) {
@@ -327,6 +394,16 @@ function decode(data) {
         const timestamp = view.getBigInt64(0, true);
         offset += 8;
         return new Date(Number(timestamp));
+      }
+      
+      case TYPE.POINTER: {
+        if (offset + 8 > data.length) {
+          throw new Error('Unexpected end of data for POINTER');
+        }
+        const view = new DataView(data.buffer, data.byteOffset + offset, 8);
+        const pointerOffset = view.getBigInt64(0, true);
+        offset += 8;
+        return new Pointer(Number(pointerOffset));
       }
       
       case TYPE.ARRAY: {
@@ -507,6 +584,9 @@ class BJsonFile {
             case TYPE.DATE:
               return 1 + 8;
             
+            case TYPE.POINTER:
+              return 1 + 8;
+            
             case TYPE.STRING: {
               const lengthView = new DataView(dataView.buffer, dataView.byteOffset + pos, 4);
               const length = lengthView.getUint32(0, true);
@@ -595,6 +675,7 @@ class BJsonFile {
 export {
   TYPE,
   ObjectId,
+  Pointer,
   encode,
   decode,
   BJsonFile

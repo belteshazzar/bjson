@@ -8,6 +8,7 @@ A compact binary encoding format for JSON data with support for Origin Private F
 - 💾 **OPFS Support**: Read and write binary JSON files using Origin Private File System
 - 🔄 **Full Round-trip**: Perfect encoding and decoding of all JSON types
 - 📦 **MongoDB ObjectId Support**: Native support for MongoDB ObjectIds (24-character hex strings)
+- 🎯 **File Pointer Support**: Built-in Pointer type for storing 64-bit file offsets for indexed data access
 - 🔍 **File Scanning**: Ability to scan through files and read records sequentially
 - ➕ **Append Operations**: Append new records to existing files
 - 🌐 **Browser & Node.js**: Works in both browser and Node.js environments
@@ -16,18 +17,19 @@ A compact binary encoding format for JSON data with support for Origin Private F
 
 The library uses the following byte values for encoding JSON types:
 
-| Type   | Byte Value | Data Format                                          |
-|--------|-----------|------------------------------------------------------|
-| NULL   | 0x00      | No additional data                                   |
-| FALSE  | 0x01      | No additional data                                   |
-| TRUE   | 0x02      | No additional data                                   |
-| INT    | 0x03      | 4 bytes (32-bit signed integer, little-endian)      |
-| FLOAT  | 0x04      | 8 bytes (64-bit float, little-endian)               |
-| STRING | 0x05      | 4-byte length + UTF-8 encoded bytes                 |
-| OID    | 0x06      | 12 bytes (MongoDB ObjectId)                         |
-| DATE   | 0x07      | 8 bytes (64-bit signed integer milliseconds, little-endian) |
-| ARRAY  | 0x10      | 4-byte length + encoded elements                    |
-| OBJECT | 0x11      | 4-byte count + key-value pairs                      |
+| Type    | Byte Value | Data Format                                          |
+|---------|-----------|------------------------------------------------------|
+| NULL    | 0x00      | No additional data                                   |
+| FALSE   | 0x01      | No additional data                                   |
+| TRUE    | 0x02      | No additional data                                   |
+| INT     | 0x03      | 4 bytes (32-bit signed integer, little-endian)      |
+| FLOAT   | 0x04      | 8 bytes (64-bit float, little-endian)               |
+| STRING  | 0x05      | 4-byte length + UTF-8 encoded bytes                 |
+| OID     | 0x06      | 12 bytes (MongoDB ObjectId)                         |
+| DATE    | 0x07      | 8 bytes (64-bit signed integer milliseconds, little-endian) |
+| POINTER | 0x08      | 8 bytes (64-bit signed integer file offset, little-endian) |
+| ARRAY   | 0x10      | 4-byte length + encoded elements                    |
+| OBJECT  | 0x11      | 4-byte count + key-value pairs                      |
 
 ## Installation
 
@@ -92,6 +94,24 @@ const decoded = decode(binary);
 
 console.log(decoded.timestamp); // Date object: 2023-01-15T12:30:45.000Z
 console.log(decoded.message); // 'Hello'
+```
+
+### Using Pointer for File Offsets
+
+```javascript
+const { Pointer, encode, decode } = require('./bjson.js');
+
+// Create an index record with a pointer to data at offset 2048
+const indexRecord = {
+  key: 'user_123',
+  dataOffset: new Pointer(2048)
+};
+
+const binary = encode(indexRecord);
+const decoded = decode(binary);
+
+console.log(decoded.dataOffset.valueOf()); // 2048
+// Use the pointer to seek to that position in a file and read data
 ```
 
 ### OPFS File Operations (Browser Only)
@@ -206,6 +226,26 @@ new ObjectId(value)
 - `toBytes()` - Returns the ObjectId as a 12-byte Uint8Array
 - `static isValid(value)` - Checks if a string is a valid ObjectId format
 
+### `Pointer`
+
+Class representing a file offset pointer.
+
+#### Constructor
+
+```javascript
+new Pointer(offset)
+```
+
+- **Parameters**: 
+  - `offset` - A non-negative integer representing a file byte offset (must be within Number.MAX_SAFE_INTEGER)
+
+#### Methods
+
+- `valueOf()` - Returns the offset as a number
+- `toString()` - Returns the offset as a string
+- `toJSON()` - Returns the offset as a number for JSON serialization
+- `equals(other)` - Compares this Pointer with another for equality
+
 ### `BJsonFile`
 
 Class for OPFS file operations (browser only).
@@ -288,6 +328,73 @@ for await (const product of file.scan()) {
 }
 
 console.log(allProducts);
+```
+
+### Using Pointers for File Seeking
+
+```javascript
+const { Pointer, encode, decode } = require('./bjson.js');
+const fs = require('fs');
+
+// Scenario: Build an index of records with pointers to actual data locations
+
+// Step 1: Write data records and track their offsets
+const records = [
+  { id: 1, name: 'Alice', email: 'alice@example.com' },
+  { id: 2, name: 'Bob', email: 'bob@example.com' },
+  { id: 3, name: 'Charlie', email: 'charlie@example.com' }
+];
+
+const dataFile = 'data.bjson';
+const indexFile = 'index.bjson';
+const index = [];
+
+// Write records and build index
+let currentOffset = 0;
+const dataBuffer = [];
+
+for (const record of records) {
+  const encoded = encode(record);
+  dataBuffer.push(encoded);
+  
+  // Store index entry with pointer to data location
+  index.push({
+    id: record.id,
+    name: record.name,
+    dataPointer: new Pointer(currentOffset)
+  });
+  
+  currentOffset += encoded.length;
+}
+
+// Write data file
+const allData = new Uint8Array(currentOffset);
+let writeOffset = 0;
+for (const buf of dataBuffer) {
+  allData.set(buf, writeOffset);
+  writeOffset += buf.length;
+}
+fs.writeFileSync(dataFile, allData);
+
+// Write index file
+const indexEncoded = encode(index);
+fs.writeFileSync(indexFile, indexEncoded);
+
+// Step 2: Use the index to seek and read specific records
+const indexData = decode(fs.readFileSync(indexFile));
+const fullDataFile = fs.readFileSync(dataFile);
+
+// Find and read record with id: 2
+const indexEntry = indexData.find(entry => entry.id === 2);
+const offset = indexEntry.dataPointer.valueOf();
+
+// Seek to offset and decode the record
+// Note: In a real implementation, you'd need to determine the record size
+// For this example, we'll read a known-size chunk
+const recordData = fullDataFile.slice(offset); // In practice, you'd know the size
+const record = decode(recordData);
+
+console.log(record); // { id: 2, name: 'Bob', email: 'bob@example.com' }
 ```
 
 ## Testing

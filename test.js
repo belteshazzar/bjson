@@ -2,7 +2,7 @@
  * Test suite for bjson encoder/decoder
  */
 
-import { TYPE, ObjectId, encode, decode, BJsonFile } from './bjson.js';
+import { TYPE, ObjectId, Pointer, encode, decode, BJsonFile } from './bjson.js';
 
 // Test counter
 let passed = 0;
@@ -153,6 +153,28 @@ assertEqual(decode(encode(epochDate)).getTime(), 0, 'DATE round-trip (epoch)');
 const futureDate = new Date('2099-12-31T23:59:59.999Z');
 assertEqual(decode(encode(futureDate)).getTime(), futureDate.getTime(), 'DATE round-trip (future)');
 
+// Test POINTER
+console.log('\n--- Testing POINTER ---');
+const pointer = new Pointer(1024);
+assert(pointer.valueOf() === 1024, 'Pointer valueOf');
+assert(pointer.toString() === '1024', 'Pointer toString');
+const pointerEncoded = encode(pointer);
+assert(pointerEncoded.length === 9, 'POINTER encoded to 9 bytes (1 type + 8 data)');
+assert(pointerEncoded[0] === TYPE.POINTER, 'POINTER has correct type byte');
+const decodedPointer = decode(pointerEncoded);
+assert(decodedPointer instanceof Pointer, 'Decoded POINTER is Pointer instance');
+assertEqual(decodedPointer.valueOf(), 1024, 'POINTER round-trip');
+
+const zeroPointer = new Pointer(0);
+assertEqual(decode(encode(zeroPointer)).valueOf(), 0, 'POINTER round-trip (zero)');
+
+const largePointer = new Pointer(9007199254740991); // MAX_SAFE_INTEGER
+assertEqual(decode(encode(largePointer)).valueOf(), 9007199254740991, 'POINTER round-trip (max safe integer)');
+
+assertThrows(() => new Pointer(-1), 'Negative offset throws error');
+assertThrows(() => new Pointer('invalid'), 'Non-number offset throws error');
+assertThrows(() => new Pointer(3.14), 'Non-integer offset throws error');
+
 // Test ARRAY
 console.log('\n--- Testing ARRAY ---');
 const arrayEncoded = encode([1, 2, 3]);
@@ -241,6 +263,36 @@ const complexActual = JSON.parse(JSON.stringify(complexDecoded, (key, value) => 
 }));
 
 assertDeepEqual(complexActual, complexExpected, 'Complex structure round-trip');
+
+// Test Pointer with file offset simulation
+console.log('\n--- Testing Pointer with File Offset Simulation ---');
+// Simulate a scenario where we have data at different offsets in a file
+// First, encode the target data that would be at a specific offset
+const targetData = { id: 123, name: 'Referenced Data', value: 42 };
+const targetEncoded = encode(targetData);
+
+// Now create a record with a pointer to where this data would be in a file
+// Let's say the target data is at offset 1024
+const recordWithPointer = {
+  type: 'reference',
+  dataPointer: new Pointer(1024),
+  metadata: 'This record points to data at offset 1024'
+};
+const recordEncoded = encode(recordWithPointer);
+
+// Decode the record and verify the pointer
+const decodedRecord = decode(recordEncoded);
+assert(decodedRecord.dataPointer instanceof Pointer, 'Decoded pointer is Pointer instance');
+assertEqual(decodedRecord.dataPointer.valueOf(), 1024, 'Pointer value is correct');
+console.log(`✓ Record with pointer successfully encoded and decoded`);
+
+// Simulate reading data at the pointer offset
+// In a real scenario, you would seek to offset 1024 in the file and read from there
+const simulatedFileOffset = decodedRecord.dataPointer.valueOf();
+assert(simulatedFileOffset === 1024, 'File offset from pointer is correct');
+// Here we would decode the target data (simulated)
+const decodedTargetData = decode(targetEncoded);
+assertDeepEqual(decodedTargetData, targetData, 'Data at pointer offset decoded correctly');
 
 // Test error handling
 console.log('\n--- Testing Error Handling ---');

@@ -126,6 +126,7 @@
   "name": "Test Document",
   "id": ObjectId("507f1f77bcf86cd799439011"),
   "createdAt": Date("2023-01-15T12:30:45Z"),
+  "dataPointer": Pointer(2048),
   "count": 42,
   "price": 99.99,
   "active": true,
@@ -160,12 +161,13 @@
     <div class="info">
       <strong>Supported special types:</strong><br>
       • <code>ObjectId("507f1f77bcf86cd799439011")</code> - MongoDB ObjectId<br>
-      • <code>Date("2023-01-15T12:30:45Z")</code> - ISO date string
+      • <code>Date("2023-01-15T12:30:45Z")</code> - ISO date string<br>
+      • <code>Pointer(2048)</code> - File offset pointer (64-bit unsigned integer)
     </div>
     
     <div>
       <label for="encodeInput">Data to Encode:</label>
-      <textarea id="encodeInput" placeholder='Enter JSON data to encode with optional ObjectId() and Date()'>{"test": "value", "number": 42, "created": Date("2023-01-15T12:30:45Z"), "_id": ObjectId("507f1f77bcf86cd799439011")}</textarea>
+      <textarea id="encodeInput" placeholder='Enter JSON data to encode with optional ObjectId() and Date()'>{"test": "value", "number": 42, "created": Date("2023-01-15T12:30:45Z"), "_id": ObjectId("507f1f77bcf86cd799439011"), "offset": Pointer(1024)}</textarea>
     </div>
 
     <div class="controls">
@@ -189,22 +191,23 @@
   <div class="container">
     <h2>Type Byte Reference</h2>
     <div class="output">
-NULL:   0x00
-FALSE:  0x01
-TRUE:   0x02
-INT:    0x03 (32-bit signed integer, 4 bytes, little-endian)
-FLOAT:  0x04 (64-bit float, 8 bytes, little-endian)
-STRING: 0x05 (length as 32-bit uint + UTF-8 bytes)
-OID:    0x06 (MongoDB ObjectId, 12 bytes)
-DATE:   0x07 (64-bit signed integer, milliseconds since epoch)
-ARRAY:  0x10 (length as 32-bit uint + elements)
-OBJECT: 0x11 (num keys as 32-bit uint + key-value pairs)
+NULL:    0x00
+FALSE:   0x01
+TRUE:    0x02
+INT:     0x03 (32-bit signed integer, 4 bytes, little-endian)
+FLOAT:   0x04 (64-bit float, 8 bytes, little-endian)
+STRING:  0x05 (length as 32-bit uint + UTF-8 bytes)
+OID:     0x06 (MongoDB ObjectId, 12 bytes)
+DATE:    0x07 (64-bit signed integer, milliseconds since epoch)
+POINTER: 0x08 (64-bit signed integer, file offset)
+ARRAY:   0x10 (length as 32-bit uint + elements)
+OBJECT:  0x11 (num keys as 32-bit uint + key-value pairs)
     </div>
   </div>
 
   <script type="module">
 
-    import { ObjectId, encode, decode, BJsonFile } from './bjson.js';
+    import { ObjectId, Pointer, encode, decode, BJsonFile } from './bjson.js';
     let currentBinary = null;
 
     // Parse extended JSON with ObjectId() and Date() constructors
@@ -222,9 +225,18 @@ OBJECT: 0x11 (num keys as 32-bit uint + key-value pairs)
       const datePattern = /Date\("([^"]+)"\)/g;
       const dates = [];
       let dateIndex = 0;
-      const jsonWithMarkers = jsonWithObjectIdMarkers.replace(datePattern, (match, dateStr) => {
+      const jsonWithDateMarkers = jsonWithObjectIdMarkers.replace(datePattern, (match, dateStr) => {
         dates.push(dateStr);
         return `"__DATE_${dateIndex++}__"`;
+      });
+
+      // Replace Pointer(...) with a temporary marker
+      const pointerPattern = /Pointer\((\d+)\)/g;
+      const pointers = [];
+      let pointerIndex = 0;
+      const jsonWithMarkers = jsonWithDateMarkers.replace(pointerPattern, (match, offset) => {
+        pointers.push(parseInt(offset));
+        return `"__POINTER_${pointerIndex++}__"`;
       });
 
       // Parse the JSON
@@ -255,6 +267,12 @@ OBJECT: 0x11 (num keys as 32-bit uint + key-value pairs)
               result[key] = new Date(dates[parseInt(dateMatch[1])]);
               continue;
             }
+
+            const pointerMatch = value.match(/^__POINTER_(\d+)__$/);
+            if (pointerMatch) {
+              result[key] = new Pointer(pointers[parseInt(pointerMatch[1])]);
+              continue;
+            }
           }
 
           result[key] = replaceMarkers(value);
@@ -273,6 +291,8 @@ OBJECT: 0x11 (num keys as 32-bit uint + key-value pairs)
           obj[key] = `ObjectId("${value.toString()}")`
         } else if (value instanceof Date) {
           obj[key] = `Date("${value.toISOString()}")`
+        } else if (value instanceof Pointer) {
+          obj[key] = `Pointer(${value.valueOf()})`
         }
       }
 
