@@ -3,7 +3,7 @@
  */
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import { RTree } from '../src/rtree.js';
-import { BJsonFile } from '../src/bjson.js';
+import { BJsonFile, ObjectId } from '../src/bjson.js';
 
 // Set up node-opfs for Node.js environment
 let hasOPFS = false;
@@ -57,11 +57,14 @@ describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
     const tree = new RTree('test-rtree.bjson', 4);
     await tree.open();
 
-    await tree.insert(40.7128, -74.0060, { name: 'New York' });
+    const id1 = new ObjectId();
+    await tree.insert(40.7128, -74.0060, id1);
     expect(tree.size()).toBe(1);
 
-    await tree.insert(34.0522, -118.2437, { name: 'Los Angeles' });
-    await tree.insert(41.8781, -87.6298, { name: 'Chicago' });
+    const id2 = new ObjectId();
+    const id3 = new ObjectId();
+    await tree.insert(34.0522, -118.2437, id2);
+    await tree.insert(41.8781, -87.6298, id3);
     expect(tree.size()).toBe(3);
 
     await tree.close();
@@ -71,9 +74,13 @@ describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
     const tree = new RTree('test-rtree.bjson', 4);
     await tree.open();
 
-    await tree.insert(40.7128, -74.0060, { name: 'New York' });
-    await tree.insert(34.0522, -118.2437, { name: 'Los Angeles' });
-    await tree.insert(41.8781, -87.6298, { name: 'Chicago' });
+    const idNY = new ObjectId();
+    const idLA = new ObjectId();
+    const idCH = new ObjectId();
+    
+    await tree.insert(40.7128, -74.0060, idNY);
+    await tree.insert(34.0522, -118.2437, idLA);
+    await tree.insert(41.8781, -87.6298, idCH);
 
     const bbox = {
       minLat: 40,
@@ -84,7 +91,7 @@ describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
 
     const results = await tree.searchBBox(bbox);
     expect(results).toHaveLength(1);
-    expect(results[0].data.name).toBe('New York');
+    expect(results[0]).toEqual(idNY);
 
     await tree.close();
   });
@@ -93,12 +100,17 @@ describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
     const tree = new RTree('test-rtree.bjson', 4);
     await tree.open();
 
-    await tree.insert(40.7128, -74.0060, { name: 'New York' });
-    await tree.insert(34.0522, -118.2437, { name: 'Los Angeles' });
-    await tree.insert(41.8781, -87.6298, { name: 'Chicago' });
+    const idNY = new ObjectId();
+    const idLA = new ObjectId();
+    const idCH = new ObjectId();
+    
+    await tree.insert(40.7128, -74.0060, idNY);
+    await tree.insert(34.0522, -118.2437, idLA);
+    await tree.insert(41.8781, -87.6298, idCH);
 
     const results = await tree.searchRadius(40.7128, -74.0060, 100);
     expect(results).toHaveLength(1);
+    expect(results[0].objectId).toEqual(idNY);
 
     const largeResults = await tree.searchRadius(40.7128, -74.0060, 5000);
     expect(largeResults).toHaveLength(3);
@@ -111,9 +123,13 @@ describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
     const tree1 = new RTree('test-rtree.bjson', 4);
     await tree1.open();
 
-    await tree1.insert(40.7128, -74.0060, { name: 'New York' });
-    await tree1.insert(34.0522, -118.2437, { name: 'Los Angeles' });
-    await tree1.insert(41.8781, -87.6298, { name: 'Chicago' });
+    const idNY = new ObjectId();
+    const idLA = new ObjectId();
+    const idCH = new ObjectId();
+    
+    await tree1.insert(40.7128, -74.0060, idNY);
+    await tree1.insert(34.0522, -118.2437, idLA);
+    await tree1.insert(41.8781, -87.6298, idCH);
 
     await tree1.close();
     expect(tree1.isOpen).toBe(false);
@@ -132,7 +148,7 @@ describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
 
     const results = await tree2.searchBBox(bbox);
     expect(results).toHaveLength(1);
-    expect(results[0].data.name).toBe('New York');
+    expect(results[0]).toEqual(idNY);
 
     await tree2.close();
   });
@@ -143,18 +159,19 @@ describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
 
     // Insert cities to force splits
     const cities = [
-      { lat: 40.7128, lng: -74.0060, name: 'New York' },
-      { lat: 34.0522, lng: -118.2437, name: 'Los Angeles' },
-      { lat: 41.8781, lng: -87.6298, name: 'Chicago' },
-      { lat: 29.7604, lng: -95.3698, name: 'Houston' },
-      { lat: 33.4484, lng: -112.0740, name: 'Phoenix' },
-      { lat: 39.9526, lng: -75.1652, name: 'Philadelphia' },
-      { lat: 29.4241, lng: -98.4936, name: 'San Antonio' },
-      { lat: 32.7157, lng: -117.1611, name: 'San Diego' }
+      { lat: 40.7128, lng: -74.0060 },
+      { lat: 34.0522, lng: -118.2437 },
+      { lat: 41.8781, lng: -87.6298 },
+      { lat: 29.7604, lng: -95.3698 },
+      { lat: 33.4484, lng: -112.0740 },
+      { lat: 39.9526, lng: -75.1652 },
+      { lat: 29.4241, lng: -98.4936 },
+      { lat: 32.7157, lng: -117.1611 }
     ];
 
     for (const city of cities) {
-      await tree.insert(city.lat, city.lng, { name: city.name });
+      const id = new ObjectId();
+      await tree.insert(city.lat, city.lng, id);
     }
 
     expect(tree.size()).toBe(8);
@@ -176,8 +193,11 @@ describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
     const tree = new RTree('test-rtree.bjson', 4);
     await tree.open();
 
-    await tree.insert(40.7128, -74.0060, { name: 'New York' });
-    await tree.insert(34.0522, -118.2437, { name: 'Los Angeles' });
+    const id1 = new ObjectId();
+    const id2 = new ObjectId();
+    
+    await tree.insert(40.7128, -74.0060, id1);
+    await tree.insert(34.0522, -118.2437, id2);
 
     await tree.clear();
     expect(tree.size()).toBe(0);

@@ -306,9 +306,9 @@ export class RTree {
 	}
 
 	/**
-	 * Insert a point into the R-tree
+	 * Insert a point into the R-tree with an ObjectId
 	 */
-	async insert(lat, lng, data) {
+	async insert(lat, lng, objectId) {
 		if (!this.isOpen) {
 			throw new Error('R-tree file must be opened before use');
 		}
@@ -320,7 +320,7 @@ export class RTree {
 			maxLng: lng
 		};
 
-		const entry = { bbox, lat, lng, data };
+		const entry = { bbox, lat, lng, objectId };
 		
 		const root = await this._loadRoot();
 		const result = await this._insert(entry, root, 1);
@@ -541,7 +541,7 @@ export class RTree {
 	}
 
 	/**
-	 * Search for points within a bounding box
+	 * Search for points within a bounding box, returning ObjectIds
 	 */
 	async searchBBox(bbox) {
 		if (!this.isOpen) {
@@ -565,7 +565,7 @@ export class RTree {
 		if (node.isLeaf) {
 			for (const entry of node.children) {
 				if (intersects(bbox, entry.bbox)) {
-					results.push(entry);
+					results.push(entry.objectId);
 				}
 			}
 		} else {
@@ -577,21 +577,45 @@ export class RTree {
 	}
 
 	/**
-	 * Search for points within a radius of a location
+	 * Search for points within a radius of a location, returning ObjectIds with distances
 	 */
 	async searchRadius(lat, lng, radiusKm) {
 		const bbox = radiusToBoundingBox(lat, lng, radiusKm);
-		const candidates = await this.searchBBox(bbox);
+		const root = await this._loadRoot();
+		const entries = [];
+		await this._searchBBoxEntries(bbox, root, entries);
 
 		const results = [];
-		for (const entry of candidates) {
+		for (const entry of entries) {
 			const dist = haversineDistance(lat, lng, entry.lat, entry.lng);
 			if (dist <= radiusKm) {
-				results.push({ ...entry, distance: dist });
+				results.push({ objectId: entry.objectId, distance: dist });
 			}
 		}
 
 		return results;
+	}
+
+	/**
+	 * Internal bounding box search that returns full entries (used by radius search)
+	 */
+	async _searchBBoxEntries(bbox, node, results) {
+		if (!node.bbox || !intersects(bbox, node.bbox)) {
+			return;
+		}
+
+		if (node.isLeaf) {
+			for (const entry of node.children) {
+				if (intersects(bbox, entry.bbox)) {
+					results.push(entry);
+				}
+			}
+		} else {
+			for (const childPointer of node.children) {
+				const childNode = await this._loadNode(childPointer);
+				await this._searchBBoxEntries(bbox, childNode, results);
+			}
+		}
 	}
 
 	/**

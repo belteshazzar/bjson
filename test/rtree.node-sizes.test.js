@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import { RTree } from '../src/rtree.js';
-import { BJsonFile } from '../src/bjson.js';
+import { BJsonFile, ObjectId } from '../src/bjson.js';
 
 // Set up node-opfs for Node.js environment
 let hasOPFS = false;
@@ -45,7 +45,8 @@ describe.skipIf(!hasOPFS)('R-tree Node Size Handling', () => {
     const tree = new RTree('test-rtree-node-sizes.bjson', 4);
     await tree.open();
 
-    await tree.insert(40.7128, -74.0060, { name: 'New York', id: 1 });
+    const id = new ObjectId();
+    await tree.insert(40.7128, -74.0060, id);
     expect(tree.size()).toBe(1);
 
     // Verify it can be read back
@@ -56,6 +57,7 @@ describe.skipIf(!hasOPFS)('R-tree Node Size Handling', () => {
       maxLng: -73
     });
     expect(results).toHaveLength(1);
+    expect(results[0]).toEqual(id);
 
     await tree.close();
   });
@@ -65,14 +67,15 @@ describe.skipIf(!hasOPFS)('R-tree Node Size Handling', () => {
     await tree.open();
 
     const entries = [
-      { lat: 40.7128, lng: -74.0060, name: 'New York' },
-      { lat: 34.0522, lng: -118.2437, name: 'Los Angeles' },
-      { lat: 41.8781, lng: -87.6298, name: 'Chicago' },
-      { lat: 29.7604, lng: -95.3698, name: 'Houston' }
+      { lat: 40.7128, lng: -74.0060 },
+      { lat: 34.0522, lng: -118.2437 },
+      { lat: 41.8781, lng: -87.6298 },
+      { lat: 29.7604, lng: -95.3698 }
     ];
 
     for (const entry of entries) {
-      await tree.insert(entry.lat, entry.lng, { name: entry.name });
+      const id = new ObjectId();
+      await tree.insert(entry.lat, entry.lng, id);
     }
 
     expect(tree.size()).toBe(4);
@@ -91,18 +94,19 @@ describe.skipIf(!hasOPFS)('R-tree Node Size Handling', () => {
     await tree.open();
 
     const entries = [
-      { lat: 40.7128, lng: -74.0060, name: 'New York' },
-      { lat: 34.0522, lng: -118.2437, name: 'Los Angeles' },
-      { lat: 41.8781, lng: -87.6298, name: 'Chicago' },
-      { lat: 29.7604, lng: -95.3698, name: 'Houston' },
-      { lat: 33.7490, lng: -84.3880, name: 'Atlanta' },
-      { lat: 39.7392, lng: -104.9903, name: 'Denver' },
-      { lat: 47.6062, lng: -122.3321, name: 'Seattle' },
-      { lat: 37.7749, lng: -122.4194, name: 'San Francisco' }
+      { lat: 40.7128, lng: -74.0060 },
+      { lat: 34.0522, lng: -118.2437 },
+      { lat: 41.8781, lng: -87.6298 },
+      { lat: 29.7604, lng: -95.3698 },
+      { lat: 33.7490, lng: -84.3880 },
+      { lat: 39.7392, lng: -104.9903 },
+      { lat: 47.6062, lng: -122.3321 },
+      { lat: 37.7749, lng: -122.4194 }
     ];
 
     for (const entry of entries) {
-      await tree.insert(entry.lat, entry.lng, { name: entry.name });
+      const id = new ObjectId();
+      await tree.insert(entry.lat, entry.lng, id);
     }
 
     expect(tree.size()).toBe(8);
@@ -127,24 +131,14 @@ describe.skipIf(!hasOPFS)('R-tree Node Size Handling', () => {
     const tree = new RTree('test-rtree-node-sizes.bjson', 8);
     await tree.open();
 
-    // Insert entries with large metadata objects (reduced from 1KB to 200 bytes)
+    // Insert ObjectIds at random locations
     const entries = [];
     for (let i = 0; i < 16; i++) {
       const lat = 20 + Math.random() * 40;
       const lng = -130 + Math.random() * 80;
-      const largeMeta = {
-        id: i,
-        name: `Location-${i}`,
-        description: 'x'.repeat(200), // 200 bytes of metadata per entry
-        tags: Array(10).fill(`tag-${i}`),
-        properties: {
-          key1: 'value1',
-          key2: 'value2',
-          key3: 'value3'
-        }
-      };
-      entries.push({ lat, lng, meta: largeMeta });
-      await tree.insert(lat, lng, largeMeta);
+      const id = new ObjectId();
+      entries.push({ lat, lng, id });
+      await tree.insert(lat, lng, id);
     }
 
     expect(tree.size()).toBe(16);
@@ -172,18 +166,14 @@ describe.skipIf(!hasOPFS)('R-tree Node Size Handling', () => {
     const tree = new RTree('test-rtree-node-sizes.bjson', 16);
     await tree.open();
 
-    // Insert 50 entries with metadata
+    // Insert 50 entries with ObjectIds
     const insertedIds = [];
     for (let i = 0; i < 50; i++) {
       const lat = 20 + Math.random() * 40;
       const lng = -130 + Math.random() * 80;
-      const meta = {
-        id: i,
-        index: i,
-        data: 'x'.repeat(200) // 200 bytes per entry
-      };
-      insertedIds.push(i);
-      await tree.insert(lat, lng, meta);
+      const id = new ObjectId();
+      insertedIds.push(id);
+      await tree.insert(lat, lng, id);
     }
 
     expect(tree.size()).toBe(50);
@@ -211,27 +201,11 @@ describe.skipIf(!hasOPFS)('R-tree Node Size Handling', () => {
     const tree = new RTree('test-rtree-node-sizes.bjson', 4);
     await tree.open();
 
-    // Create deeply nested metadata
-    const createNestedObject = (depth) => {
-      if (depth === 0) {
-        return { value: 'leaf' };
-      }
-      return {
-        nested: createNestedObject(depth - 1),
-        level: depth
-      };
-    };
-
     for (let i = 0; i < 8; i++) {
       const lat = 30 + Math.random() * 10;
       const lng = -100 + Math.random() * 10;
-      const deepMeta = {
-        id: i,
-        structure: createNestedObject(5), // 5 levels deep
-        array: [1, 2, 3, 4, 5],
-        object: { a: 1, b: 2, c: 3 }
-      };
-      await tree.insert(lat, lng, deepMeta);
+      const id = new ObjectId();
+      await tree.insert(lat, lng, id);
     }
 
     expect(tree.size()).toBe(8);
@@ -259,34 +233,12 @@ describe.skipIf(!hasOPFS)('R-tree Node Size Handling', () => {
     const tree = new RTree('test-rtree-node-sizes.bjson', 6);
     await tree.open();
 
-    // Insert entries with varying metadata sizes
+    // Insert entries with ObjectIds
     for (let i = 0; i < 20; i++) {
       const lat = 25 + Math.random() * 30;
       const lng = -120 + Math.random() * 60;
-      
-      // Vary metadata size
-      let meta;
-      if (i % 3 === 0) {
-        // Small metadata
-        meta = { id: i };
-      } else if (i % 3 === 1) {
-        // Medium metadata
-        meta = {
-          id: i,
-          name: `Location-${i}`,
-          description: 'x'.repeat(200)
-        };
-      } else {
-        // Large metadata
-        meta = {
-          id: i,
-          name: `Location-${i}`,
-          description: 'x'.repeat(400),
-          data: Array(10).fill(i)
-        };
-      }
-      
-      await tree.insert(lat, lng, meta);
+      const id = new ObjectId();
+      await tree.insert(lat, lng, id);
     }
 
     expect(tree.size()).toBe(20);
@@ -331,11 +283,8 @@ describe.skipIf(!hasOPFS)('R-tree Node Size Handling', () => {
     for (let i = 0; i < 20; i++) {
       const lat = 25 + Math.random() * 30;
       const lng = -120 + Math.random() * 60;
-      const meta = {
-        id: i,
-        data: 'x'.repeat(100 * (i + 1)) // Growing metadata
-      };
-      await tree.insert(lat, lng, meta);
+      const id = new ObjectId();
+      await tree.insert(lat, lng, id);
 
       // Get file size as proxy for total node size
       const fileSize = await tree.file.getFileSize();
