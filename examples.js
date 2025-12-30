@@ -2,7 +2,7 @@
  * Example usage of bjson library
  */
 
-import { ObjectId, encode, decode } from './bjson.js';
+import { ObjectId, Pointer, encode, decode } from './bjson.js';
 
 console.log('=== Binary JSON Examples ===\n');
 
@@ -79,8 +79,35 @@ console.log(`   Decoded:`, {
 });
 console.log();
 
-// Example 5: Complex nested structure
-console.log('5. Complex Structure:');
+// Example 5: Pointer (File Offset Reference)
+console.log('5. Pointer (File Offset Reference):');
+const docWithPointer = {
+  type: 'index',
+  key: 'user_123',
+  dataOffset: new Pointer(2048),
+  metadata: 'Points to user data at byte offset 2048'
+};
+
+const pointerEncoded = encode(docWithPointer);
+console.log(`   Original:`, { 
+  type: docWithPointer.type, 
+  key: docWithPointer.key,
+  dataOffset: docWithPointer.dataOffset.valueOf(), 
+  metadata: docWithPointer.metadata 
+});
+console.log(`   Encoded size: ${pointerEncoded.length} bytes`);
+const pointerDecoded = decode(pointerEncoded);
+console.log(`   Decoded:`, { 
+  type: pointerDecoded.type, 
+  key: pointerDecoded.key,
+  dataOffset: pointerDecoded.dataOffset.valueOf(), 
+  metadata: pointerDecoded.metadata 
+});
+console.log(`   Pointer offset for file seeking: ${pointerDecoded.dataOffset.valueOf()}`);
+console.log();
+
+// Example 6: Complex nested structure
+console.log('6. Complex Structure:');
 const complex = {
   _id: new ObjectId('507f1f77bcf86cd799439011'),
   title: 'Blog Post',
@@ -113,8 +140,8 @@ const complexDecoded = decode(complexEncoded);
 console.log(`   Successful round-trip: ${JSON.stringify(complexDecoded._id.toString()) === JSON.stringify(complex._id.toString())}`);
 console.log();
 
-// Example 6: Size comparison
-console.log('6. Size Comparison (JSON vs Binary):');
+// Example 7: Size comparison
+console.log('7. Size Comparison (JSON vs Binary):');
 const testData = [
   { name: 'Small object', data: { a: 1, b: 2 } },
   { name: 'Array of numbers', data: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] },
@@ -132,8 +159,8 @@ testData.forEach(({ name, data }) => {
 });
 console.log();
 
-// Example 7: Error handling
-console.log('7. Error Handling:');
+// Example 8: Error handling
+console.log('8. Error Handling:');
 try {
   const invalid = new Uint8Array([0xFF, 0x00, 0x00]);
   decode(invalid);
