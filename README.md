@@ -116,43 +116,59 @@ console.log(decoded.dataOffset.valueOf()); // 2048
 
 ### OPFS File Operations (Browser Only)
 
+**Important**: Files must be explicitly opened before use and closed when done. Files can be opened in two modes:
+- `'r'` - Read-only mode (file must exist)
+- `'rw'` - Read-write mode (file created if it doesn't exist)
+
+See [FILE-MODE-API.md](FILE-MODE-API.md) for detailed documentation.
+
 #### Write to File
 
 ```javascript
 const { BJsonFile } = window.BJson;
 
 const file = new BJsonFile('data.bjson');
-const data = { name: 'John', age: 30 };
+await file.open('rw');  // Open in read-write mode
 
+const data = { name: 'John', age: 30 };
 await file.write(data);
+
+await file.close();
 ```
 
 #### Read from File
 
 ```javascript
 const file = new BJsonFile('data.bjson');
-const data = await file.read();
+await file.open('r');  // Open in read-only mode
 
+const data = await file.read();
 console.log(data); // { name: 'John', age: 30 }
+
+await file.close();
 ```
 
 #### Append to File
 
 ```javascript
 const file = new BJsonFile('data.bjson');
+await file.open('rw');  // Open in read-write mode
 
 // Write initial record
 await file.write({ id: 1, name: 'Record 1' });
 
-// Append more records
+// Append more records (same file handle)
 await file.append({ id: 2, name: 'Record 2' });
 await file.append({ id: 3, name: 'Record 3' });
+
+await file.close();
 ```
 
 #### Scan File (Read All Records)
 
 ```javascript
 const file = new BJsonFile('data.bjson');
+await file.open('r');  // Open in read-only mode
 
 for await (const record of file.scan()) {
   console.log(record);
@@ -161,6 +177,8 @@ for await (const record of file.scan()) {
 // { id: 1, name: 'Record 1' }
 // { id: 2, name: 'Record 2' }
 // { id: 3, name: 'Record 3' }
+
+await file.close();
 ```
 
 #### Other File Operations
@@ -168,12 +186,37 @@ for await (const record of file.scan()) {
 ```javascript
 const file = new BJsonFile('data.bjson');
 
-// Check if file exists
+// Check if file exists (doesn't require opening)
 const exists = await file.exists();
 console.log(exists); // true or false
 
-// Delete file
-await file.delete();
+// Delete file (requires read-write mode)
+await file.open('rw');
+await file.delete();  // Automatically closes after deletion
+```
+
+#### Reusing File Handles
+
+One file handle can be used for multiple operations, improving efficiency:
+
+```javascript
+const file = new BJsonFile('data.bjson');
+await file.open('rw');
+
+// Multiple operations on the same handle
+await file.write({ id: 1 });
+await file.append({ id: 2 });
+await file.append({ id: 3 });
+
+// Read back from same handle
+const data = await file.read();
+
+// Scan without re-opening
+for await (const record of file.scan()) {
+  console.log(record);
+}
+
+await file.close();
 ```
 
 ## Browser Support
@@ -250,6 +293,8 @@ new Pointer(offset)
 
 Class for OPFS file operations (browser only).
 
+**Important**: Files must be opened before use and closed when done. See [FILE-MODE-API.md](FILE-MODE-API.md) for detailed documentation.
+
 #### Constructor
 
 ```javascript
@@ -260,12 +305,26 @@ new BJsonFile(filename)
 
 #### Methods
 
-- `async write(data)` - Write data to file (overwrites existing)
-- `async read()` - Read and decode data from file
-- `async append(data)` - Append data to existing file
-- `async *scan()` - Async generator to scan through all records in file
-- `async delete()` - Delete the file
-- `async exists()` - Check if file exists
+- `async open(mode)` - Open file in specified mode
+  - `mode` - `'r'` for read-only (file must exist) or `'rw'` for read-write (creates if needed)
+  - Throws error if file already open or if file not found in read mode
+- `async close()` - Close the file and release handle
+- `async write(data)` - Write data to file (overwrites existing, requires 'rw' mode)
+- `async read()` - Read and decode data from file (requires file to be open)
+- `async append(data)` - Append data to existing file (requires 'rw' mode)
+- `async *scan()` - Async generator to scan through all records (requires file to be open)
+- `async delete()` - Delete the file (requires 'rw' mode, auto-closes after)
+- `async exists()` - Check if file exists (can be called without opening)
+
+#### Access Control
+
+- **Read-only mode (`'r'`)**:
+  - Can use: `read()`, `scan()`, `getFileSize()`, `readRange()`
+  - Cannot use: `write()`, `append()`, `delete()` (will throw errors)
+  
+- **Read-write mode (`'rw'`)**:
+  - Can use all methods
+  - File is created if it doesn't exist
 
 ## Examples
 
@@ -305,6 +364,7 @@ console.log(decoded);
 
 ```javascript
 const file = new BJsonFile('products.bjson');
+await file.open('rw');  // Open once for multiple operations
 
 // Write multiple products
 const products = [
@@ -316,18 +376,20 @@ const products = [
 // Write first product
 await file.write(products[0]);
 
-// Append remaining products
+// Append remaining products (same file handle)
 for (let i = 1; i < products.length; i++) {
   await file.append(products[i]);
 }
 
-// Read all products
+// Read all products (same file handle)
 const allProducts = [];
 for await (const product of file.scan()) {
   allProducts.push(product);
 }
 
 console.log(allProducts);
+
+await file.close();
 ```
 
 ### Using Pointers for File Seeking

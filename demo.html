@@ -317,7 +317,9 @@ OBJECT:  0x11 (num keys as 32-bit uint + key-value pairs)
         const data = parseExtendedJSON(jsonInput);
         
         const file = new BJsonFile(getFilename());
+        await file.open('rw');
         await file.write(data);
+        await file.close();
         
         showMessage('message', `Successfully wrote data to ${getFilename()}`);
         document.getElementById('output').textContent = 'Data written to file successfully!';
@@ -332,7 +334,9 @@ OBJECT:  0x11 (num keys as 32-bit uint + key-value pairs)
     async function readFile() {
       try {
         const file = new BJsonFile(getFilename());
+        await file.open('r');
         const data = await file.read();
+        await file.close();
         
         showMessage('message', `Successfully read data from ${getFilename()}`);
         document.getElementById('output').textContent = formatOutput(data);
@@ -350,7 +354,9 @@ OBJECT:  0x11 (num keys as 32-bit uint + key-value pairs)
         const data = parseExtendedJSON(jsonInput);
         
         const file = new BJsonFile(getFilename());
+        await file.open('rw');
         await file.append(data);
+        await file.close();
         
         showMessage('message', `Successfully appended data to ${getFilename()}`);
         document.getElementById('output').textContent = 'Data appended to file successfully!';
@@ -365,11 +371,14 @@ OBJECT:  0x11 (num keys as 32-bit uint + key-value pairs)
     async function scanFile() {
       try {
         const file = new BJsonFile(getFilename());
+        await file.open('r');
         const records = [];
         
         for await (const record of file.scan()) {
           records.push(record);
         }
+        
+        await file.close();
         
         showMessage('message', `Successfully scanned ${records.length} record(s) from ${getFilename()}`);
         document.getElementById('output').textContent = formatOutput(records);
@@ -384,6 +393,7 @@ OBJECT:  0x11 (num keys as 32-bit uint + key-value pairs)
     async function deleteFile() {
       try {
         const file = new BJsonFile(getFilename());
+        await file.open('rw');
         await file.delete();
         
         showMessage('message', `Successfully deleted ${getFilename()}`);

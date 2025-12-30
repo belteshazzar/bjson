@@ -476,16 +476,40 @@ class BJsonFile {
     this.root = null;
     this.fileHandle = null;
     this.file = null;
+    this.mode = null; // 'r' for read-only, 'rw' for read-write
+    this.isOpen = false;
   }
 
-  async init() {
+  /**
+   * Open the file with specified mode
+   * @param {string} mode - 'r' for read-only, 'rw' for read-write
+   */
+  async open(mode = 'r') {
+    if (this.isOpen) {
+      throw new Error(`File is already open in ${this.mode} mode`);
+    }
+
+    if (mode !== 'r' && mode !== 'rw') {
+      throw new Error(`Invalid mode: ${mode}. Use 'r' for read-only or 'rw' for read-write`);
+    }
+
     if (!navigator.storage || !navigator.storage.getDirectory) {
       throw new Error('Origin Private File System (OPFS) is not supported in this browser');
     }
+
     this.root = await navigator.storage.getDirectory();
+    this.mode = mode;
+
     try {
-      this.fileHandle = await this.root.getFileHandle(this.filename);
+      // For read mode, file must exist
+      if (mode === 'r') {
+        this.fileHandle = await this.root.getFileHandle(this.filename);
+      } else {
+        // For read-write mode, create if doesn't exist
+        this.fileHandle = await this.root.getFileHandle(this.filename, { create: true });
+      }
       this.file = await this.fileHandle.getFile();
+      this.isOpen = true;
     } catch (error) {
       if (error.name === 'NotFoundError') {
         throw new Error(`File not found: ${this.filename}`);
@@ -494,69 +518,98 @@ class BJsonFile {
     }
   }
 
+  /**
+   * Close the file
+   */
+  async close() {
+    this.isOpen = false;
+    this.mode = null;
+    this.fileHandle = null;
+    this.file = null;
+  }
+
+  /**
+   * Ensure file is open, throw if not
+   */
+  ensureOpen() {
+    if (!this.isOpen) {
+      throw new Error(`File is not open. Call open('r') or open('rw') first`);
+    }
+  }
+
+  /**
+   * Ensure file is writable, throw if read-only
+   */
+  ensureWritable() {
+    this.ensureOpen();
+    if (this.mode === 'r') {
+      throw new Error(`File is opened in read-only mode. Cannot write or append`);
+    }
+  }
+
+  /**
+   * Refresh the file reference (needed after writes to get updated size)
+   */
+  async refreshFile() {
+    this.ensureOpen();
+    this.file = await this.fileHandle.getFile();
+  }
+
   async readRange(start, length) {
-    const slice = file.slice(start, start + length);
+    this.ensureOpen();
+    const slice = this.file.slice(start, start + length);
     const arrayBuffer = await slice.arrayBuffer();
     return new Uint8Array(arrayBuffer);
   }
 
   async getFileSize() {
-    return file.size;
+    this.ensureOpen();
+    return this.file.size;
   }
 
   async write(data) {
+    this.ensureWritable();
     
     // Encode data to binary
     const binaryData = encode(data);
     
-    // Get file handle
-    this.fileHandle = await this.root.getFileHandle(this.filename, { create: true });
-    
-    // Create writable stream
+    // Create writable stream (truncates existing content)
     const writable = await this.fileHandle.createWritable();
     
     // Write data
     await writable.write(binaryData);
     await writable.close();
+    
+    // Refresh file reference to get updated size
+    await this.refreshFile();
   }
 
   async read() {
-    await this.init();
+    this.ensureOpen();
     
-    try {
-      const fileSize = await this.getFileSize();
-      
-      if (fileSize === 0) {
-        throw new Error(`File is empty: ${this.filename}`);
-      }
-      
-      // Read the entire file using readRange
-      const binaryData = await this.readRange(0, fileSize);
-      
-      // Decode and return
-      return decode(binaryData);
-    } catch (error) {
-      if (error.name === 'NotFoundError') {
-        throw new Error(`File not found: ${this.filename}`);
-      }
-      throw error;
+    const fileSize = await this.getFileSize();
+    
+    if (fileSize === 0) {
+      throw new Error(`File is empty: ${this.filename}`);
     }
+    
+    // Read the entire file using readRange
+    const binaryData = await this.readRange(0, fileSize);
+    
+    // Decode and return
+    return decode(binaryData);
   }
 
   async append(data) {
-    await this.init();
+    this.ensureWritable();
     
     // Encode new data to binary
     const binaryData = encode(data);
     
-    // Get file handle
-    this.fileHandle = await this.root.getFileHandle(this.filename, { create: true });
+    // Get current file size
+    const existingSize = this.file.size;
     
-    // Get existing file size
-    const file = await this.fileHandle.getFile();
-    const existingSize = file.size;
-    
-    // Create writable stream
+    // Create writable stream with keepExistingData
     const writable = await this.fileHandle.createWritable({ keepExistingData: true });
     
     // Seek to end
@@ -565,13 +618,15 @@ class BJsonFile {
     // Write new data
     await writable.write(binaryData);
     await writable.close();
+    
+    // Refresh file reference to get updated size
+    await this.refreshFile();
   }
 
   async *scan() {
-    await this.init();
+    this.ensureOpen();
     
-    try {
-      const fileSize = await this.getFileSize();
+    const fileSize = await this.getFileSize();
       
       if (fileSize === 0) {
         return;
@@ -672,18 +727,15 @@ class BJsonFile {
         // Decode and yield this value
         yield decode(valueData);
       }
-    } catch (error) {
-      if (error.name === 'NotFoundError') {
-        throw new Error(`File not found: ${this.filename}`);
-      }
-      throw error;
-    }
   }
 
   async delete() {
-    await this.init();
+    this.ensureWritable();
+    
     try {
       await this.root.removeEntry(this.filename);
+      // File is deleted, mark as closed
+      await this.close();
     } catch (error) {
       if (error.name === 'NotFoundError') {
         // File doesn't exist, nothing to delete
@@ -694,9 +746,13 @@ class BJsonFile {
   }
 
   async exists() {
-    await this.init();
+    if (!navigator.storage || !navigator.storage.getDirectory) {
+      throw new Error('Origin Private File System (OPFS) is not supported in this browser');
+    }
+    
+    const root = await navigator.storage.getDirectory();
     try {
-      await this.root.getFileHandle(this.filename);
+      await root.getFileHandle(this.filename);
       return true;
     } catch (error) {
       if (error.name === 'NotFoundError') {
