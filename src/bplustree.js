@@ -1,16 +1,8 @@
 /**
- * PersistentImmutableBPlusTree - Persistent variant with BJsonFile storage
- * 
- * This extends the immutable B+ tree concept to provide durable on-disk storage
- * using append-only BJsonFile records.
- * 
- * File format (append-only BJsonFile):
- * - All nodes are stored as bjson records in the file
- * - Node references use Pointer objects for file offsets
- * - Metadata stored at end of file containing tree state
+ * BPlusTree - Persistent immutable B+ tree with BJsonFile storage
  * 
  * Usage pattern:
- *   const tree = new PersistentImmutableBPlusTree('tree.bjson');
+ *   const tree = new BPlusTree('tree.bjson');
  *   await tree.open();
  *   await tree.add(key, value);
  *   await tree.close();
@@ -22,7 +14,7 @@ import { BJsonFile, Pointer } from './bjson.js';
  * Node for persistent storage
  * @private
  */
-class PersistentNodeData {
+class NodeData {
     /**
      * Creates a node data object for serialization
      * @param {number} id - Unique node ID
@@ -104,7 +96,7 @@ export class BPlusTree {
      * Initialize a new empty tree
      */
     async _initializeNewTree() {
-        const rootNode = new PersistentNodeData(0, true, [], [], [], null);
+        const rootNode = new NodeData(0, true, [], [], [], null);
         this.nextNodeId = 1;
         this._size = 0;
 
@@ -177,7 +169,7 @@ export class BPlusTree {
         }
 
         const data = await this.file.read(pointer.valueOf());
-        return new PersistentNodeData(
+        return new NodeData(
             data.id,
             data.isLeaf,
             data.keys,
@@ -237,7 +229,7 @@ export class BPlusTree {
             // Split occurred - save the split nodes and create new root with pointers
             const leftPointer = await this._saveNode(result.left);
             const rightPointer = await this._saveNode(result.right);
-            newRoot = new PersistentNodeData(
+            newRoot = new NodeData(
                 this.nextNodeId++,
                 false,
                 [result.splitKey],
@@ -265,7 +257,7 @@ export class BPlusTree {
             if (existingIdx !== -1) {
                 values[existingIdx] = value;
                 return {
-                    newNode: new PersistentNodeData(node.id, true, keys, values, [], null)
+                    newNode: new NodeData(node.id, true, keys, values, [], null)
                 };
             }
 
@@ -278,7 +270,7 @@ export class BPlusTree {
 
             if (keys.length < this.order) {
                 return {
-                    newNode: new PersistentNodeData(node.id, true, keys, values, [], null)
+                    newNode: new NodeData(node.id, true, keys, values, [], null)
                 };
             } else {
                 const mid = Math.ceil(keys.length / 2);
@@ -287,8 +279,8 @@ export class BPlusTree {
                 const rightKeys = keys.slice(mid);
                 const rightValues = values.slice(mid);
 
-                const rightNode = new PersistentNodeData(this.nextNodeId++, true, rightKeys, rightValues, [], null);
-                const leftNode = new PersistentNodeData(node.id, true, leftKeys, leftValues, [], null);
+                const rightNode = new NodeData(this.nextNodeId++, true, rightKeys, rightValues, [], null);
+                const leftNode = new NodeData(node.id, true, leftKeys, leftValues, [], null);
 
                 return {
                     left: leftNode,
@@ -312,7 +304,7 @@ export class BPlusTree {
                 const newChildPointer = await this._saveNode(result.newNode);
                 children[childIdx] = newChildPointer;
                 return {
-                    newNode: new PersistentNodeData(node.id, false, keys, [], children, null)
+                    newNode: new NodeData(node.id, false, keys, [], children, null)
                 };
             } else {
                 const leftPointer = await this._saveNode(result.left);
@@ -323,7 +315,7 @@ export class BPlusTree {
 
                 if (keys.length < this.order) {
                     return {
-                        newNode: new PersistentNodeData(node.id, false, keys, [], children, null)
+                        newNode: new NodeData(node.id, false, keys, [], children, null)
                     };
                 } else {
                     const mid = Math.ceil(keys.length / 2) - 1;
@@ -333,8 +325,8 @@ export class BPlusTree {
                     const leftChildren = children.slice(0, mid + 1);
                     const rightChildren = children.slice(mid + 1);
 
-                    const leftNode = new PersistentNodeData(node.id, false, leftKeys, [], leftChildren, null);
-                    const rightNode = new PersistentNodeData(this.nextNodeId++, false, rightKeys, [], rightChildren, null);
+                    const leftNode = new NodeData(node.id, false, leftKeys, [], leftChildren, null);
+                    const rightNode = new NodeData(this.nextNodeId++, false, rightKeys, [], rightChildren, null);
 
                     return {
                         left: leftNode,
@@ -384,7 +376,7 @@ export class BPlusTree {
             newKeys.splice(keyIndex, 1);
             newValues.splice(keyIndex, 1);
 
-            return new PersistentNodeData(node.id, true, newKeys, newValues, [], node.next);
+            return new NodeData(node.id, true, newKeys, newValues, [], node.next);
         } else {
             let i = 0;
             while (i < node.keys.length && key >= node.keys[i]) {
@@ -402,7 +394,7 @@ export class BPlusTree {
             const newChildPointer = await this._saveNode(newChild);
             newChildren[i] = newChildPointer;
 
-            return new PersistentNodeData(node.id, false, [...node.keys], [], newChildren, null);
+            return new NodeData(node.id, false, [...node.keys], [], newChildren, null);
         }
     }
 
