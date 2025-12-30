@@ -45,7 +45,7 @@ class PersistentNodeData {
 /**
  * Persistent immutable B+ tree with append-only file storage
  */
-export class PersistentImmutableBPlusTree {
+export class BPlusTree {
     /**
      * Creates a new persistent B+ tree
      * @param {string} filename - Path to storage file
@@ -120,11 +120,11 @@ export class PersistentImmutableBPlusTree {
     async _saveMetadata() {
         const metadata = {
             version: 1,
-            order: this.order,
-            minKeys: this.minKeys,
+            maxEntries: this.order,  // Renamed to match RTree size
+            minEntries: this.minKeys,  // Renamed to match RTree size
             size: this._size,
             rootPointer: this.rootPointer ? this.rootPointer.valueOf() : null,
-            nextNodeId: this.nextNodeId
+            nextId: this.nextNodeId  // Renamed to match RTree size
         };
 
         await this.file.append(metadata);
@@ -135,7 +135,9 @@ export class PersistentImmutableBPlusTree {
      */
     async _loadMetadata() {
         const fileSize = await this.file.getFileSize();
-        const METADATA_SIZE = 115; // Estimated size
+        // Metadata object has same structure as RTree: 6 INT fields
+        // Using RTree's tested size
+        const METADATA_SIZE = 111;
         
         if (fileSize < METADATA_SIZE) {
             throw new Error('Invalid tree file');
@@ -144,10 +146,14 @@ export class PersistentImmutableBPlusTree {
         const metadataOffset = fileSize - METADATA_SIZE;
         const metadata = await this.file.read(metadataOffset);
 
-        this.order = metadata.order;
-        this.minKeys = metadata.minKeys;
+        if (!metadata || typeof metadata.maxEntries === 'undefined') {
+            throw new Error(`Failed to read metadata: missing required fields`);
+        }
+
+        this.order = metadata.maxEntries;
+        this.minKeys = metadata.minEntries;
         this._size = metadata.size;
-        this.nextNodeId = metadata.nextNodeId;
+        this.nextNodeId = metadata.nextId;
         this.rootPointer = metadata.rootPointer !== null && metadata.rootPointer !== undefined
             ? new Pointer(metadata.rootPointer)
             : null;
@@ -228,22 +234,23 @@ export class PersistentImmutableBPlusTree {
         if (result.newNode) {
             newRoot = result.newNode;
         } else {
+            // Split occurred - save the split nodes and create new root with pointers
+            const leftPointer = await this._saveNode(result.left);
+            const rightPointer = await this._saveNode(result.right);
             newRoot = new PersistentNodeData(
                 this.nextNodeId++,
                 false,
                 [result.splitKey],
                 [],
-                [result.left, result.right]
+                [leftPointer, rightPointer],
+                null
             );
         }
 
         const rootPointer = await this._saveNode(newRoot);
         this.rootPointer = rootPointer;
 
-        await this._rebuildNextPointers(newRoot);
-
         this._size++;
-        await this._saveMetadata();
     }
 
     /**
@@ -305,7 +312,7 @@ export class PersistentImmutableBPlusTree {
                 const newChildPointer = await this._saveNode(result.newNode);
                 children[childIdx] = newChildPointer;
                 return {
-                    newNode: new PersistentNodeData(node.id, false, keys, [], children)
+                    newNode: new PersistentNodeData(node.id, false, keys, [], children, null)
                 };
             } else {
                 const leftPointer = await this._saveNode(result.left);
@@ -316,7 +323,7 @@ export class PersistentImmutableBPlusTree {
 
                 if (keys.length < this.order) {
                     return {
-                        newNode: new PersistentNodeData(node.id, false, keys, [], children)
+                        newNode: new PersistentNodeData(node.id, false, keys, [], children, null)
                     };
                 } else {
                     const mid = Math.ceil(keys.length / 2) - 1;
@@ -326,8 +333,8 @@ export class PersistentImmutableBPlusTree {
                     const leftChildren = children.slice(0, mid + 1);
                     const rightChildren = children.slice(mid + 1);
 
-                    const leftNode = new PersistentNodeData(node.id, false, leftKeys, [], leftChildren);
-                    const rightNode = new PersistentNodeData(this.nextNodeId++, false, rightKeys, [], rightChildren);
+                    const leftNode = new PersistentNodeData(node.id, false, leftKeys, [], leftChildren, null);
+                    const rightNode = new PersistentNodeData(this.nextNodeId++, false, rightKeys, [], rightChildren, null);
 
                     return {
                         left: leftNode,
@@ -358,10 +365,7 @@ export class PersistentImmutableBPlusTree {
         const rootPointer = await this._saveNode(finalRoot);
         this.rootPointer = rootPointer;
 
-        await this._rebuildNextPointers(finalRoot);
-
         this._size--;
-        await this._saveMetadata();
     }
 
     /**
@@ -398,40 +402,7 @@ export class PersistentImmutableBPlusTree {
             const newChildPointer = await this._saveNode(newChild);
             newChildren[i] = newChildPointer;
 
-            return new PersistentNodeData(node.id, false, [...node.keys], [], newChildren);
-        }
-    }
-
-    /**
-     * Rebuild next pointers
-     */
-    async _rebuildNextPointers(root) {
-        const leaves = [];
-        await this._collectLeaves(root, leaves);
-
-        for (let i = 0; i < leaves.length - 1; i++) {
-            leaves[i].next = leaves[i + 1] ? new Pointer(leaves[i + 1].id) : null;
-        }
-        if (leaves.length > 0) {
-            leaves[leaves.length - 1].next = null;
-        }
-
-        for (const leaf of leaves) {
-            await this._saveNode(leaf);
-        }
-    }
-
-    /**
-     * Collect leaves
-     */
-    async _collectLeaves(node, leaves) {
-        if (node.isLeaf) {
-            leaves.push(node);
-        } else {
-            for (const childPointer of node.children) {
-                const child = await this._loadNode(childPointer);
-                await this._collectLeaves(child, leaves);
-            }
+            return new PersistentNodeData(node.id, false, [...node.keys], [], newChildren, null);
         }
     }
 
@@ -440,31 +411,28 @@ export class PersistentImmutableBPlusTree {
      */
     async toArray() {
         const result = [];
-        const root = await this._loadRoot();
-        let current = await this._getFirstLeaf(root);
-
-        while (current) {
-            for (let i = 0; i < current.keys.length; i++) {
-                result.push({
-                    key: current.keys[i],
-                    value: current.values[i]
-                });
-            }
-            current = current.next ? await this._loadNode(current.next) : null;
-        }
-
+        await this._collectAllEntries(await this._loadRoot(), result);
         return result;
     }
 
     /**
-     * Get first leaf
+     * Collect all entries in sorted order by traversing tree
+     * @private
      */
-    async _getFirstLeaf(node) {
+    async _collectAllEntries(node, result) {
         if (node.isLeaf) {
-            return node;
+            for (let i = 0; i < node.keys.length; i++) {
+                result.push({
+                    key: node.keys[i],
+                    value: node.values[i]
+                });
+            }
+        } else {
+            for (const childPointer of node.children) {
+                const child = await this._loadNode(childPointer);
+                await this._collectAllEntries(child, result);
+            }
         }
-        const firstChild = await this._loadNode(node.children[0]);
-        return this._getFirstLeaf(firstChild);
     }
 
     /**
@@ -486,28 +454,30 @@ export class PersistentImmutableBPlusTree {
      */
     async rangeSearch(minKey, maxKey) {
         const result = [];
-        const root = await this._loadRoot();
-        let current = await this._getFirstLeaf(root);
+        await this._rangeSearchNode(await this._loadRoot(), minKey, maxKey, result);
+        return result;
+    }
 
-        while (current && current.keys[current.keys.length - 1] < minKey) {
-            current = current.next ? await this._loadNode(current.next) : null;
-        }
-
-        while (current) {
-            for (let i = 0; i < current.keys.length; i++) {
-                if (current.keys[i] >= minKey && current.keys[i] <= maxKey) {
+    /**
+     * Range search helper that traverses tree
+     * @private
+     */
+    async _rangeSearchNode(node, minKey, maxKey, result) {
+        if (node.isLeaf) {
+            for (let i = 0; i < node.keys.length; i++) {
+                if (node.keys[i] >= minKey && node.keys[i] <= maxKey) {
                     result.push({
-                        key: current.keys[i],
-                        value: current.values[i]
+                        key: node.keys[i],
+                        value: node.values[i]
                     });
-                } else if (current.keys[i] > maxKey) {
-                    return result;
                 }
             }
-            current = current.next ? await this._loadNode(current.next) : null;
+        } else {
+            for (const childPointer of node.children) {
+                const child = await this._loadNode(childPointer);
+                await this._rangeSearchNode(child, minKey, maxKey, result);
+            }
         }
-
-        return result;
     }
 
     /**
