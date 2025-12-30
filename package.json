@@ -2,11 +2,14 @@
   "name": "bjson",
   "version": "1.0.0",
   "description": "A compact binary encoding format for JSON data with support for Origin Private File System (OPFS) in browsers",
-  "main": "bjson.js",
+  "main": "src/bjson.js",
   "type": "module",
   "scripts": {
-    "test": "node test.js",
-    "serve": "http-server -c-1 ."
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest --coverage",
+    "serve": "http-server -c-1 public"
   },
   "keywords": [
     "binary",
@@ -21,6 +24,11 @@
   "author": "",
   "license": "BSD-2-Clause",
   "devDependencies": {
-    "http-server": "^14.1.1"
+    "@vitest/coverage-v8": "^3.2.4",
+    "@vitest/ui": "^3.2.4",
+    "http-server": "^14.1.1",
+    "node-opfs": "github:belteshazzar/node-opfs",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
   }
 }

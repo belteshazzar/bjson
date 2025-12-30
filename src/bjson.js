@@ -272,25 +272,47 @@ function encode(value) {
       buffers.push(new Uint8Array(lengthBuffer));
       buffers.push(encoded);
     } else if (Array.isArray(val)) {
-      buffers.push(new Uint8Array([TYPE.ARRAY]));
+      // Encode array to temporary buffer to determine size
+      const tempBuffers = [];
+      
       // Store array length as 32-bit integer
       const lengthBuffer = new ArrayBuffer(4);
       const lengthView = new DataView(lengthBuffer);
       lengthView.setUint32(0, val.length, true);
-      buffers.push(new Uint8Array(lengthBuffer));
-      // Encode each element
+      tempBuffers.push(new Uint8Array(lengthBuffer));
+      
+      // Encode each element into temp buffer
+      const startLength = buffers.length;
       for (const item of val) {
         encodeValue(item);
       }
+      // Collect encoded elements
+      const elementBuffers = buffers.splice(startLength);
+      tempBuffers.push(...elementBuffers);
+      
+      // Calculate total size of array content
+      const contentSize = tempBuffers.reduce((sum, buf) => sum + buf.length, 0);
+      
+      // Now write: TYPE + SIZE + CONTENT
+      buffers.push(new Uint8Array([TYPE.ARRAY]));
+      const sizeBuffer = new ArrayBuffer(4);
+      const sizeView = new DataView(sizeBuffer);
+      sizeView.setUint32(0, contentSize, true);
+      buffers.push(new Uint8Array(sizeBuffer));
+      buffers.push(...tempBuffers);
     } else if (typeof val === 'object') {
-      buffers.push(new Uint8Array([TYPE.OBJECT]));
+      // Encode object to temporary buffer to determine size
+      const tempBuffers = [];
+      
       const keys = Object.keys(val);
       // Store number of keys as 32-bit integer
       const lengthBuffer = new ArrayBuffer(4);
       const lengthView = new DataView(lengthBuffer);
       lengthView.setUint32(0, keys.length, true);
-      buffers.push(new Uint8Array(lengthBuffer));
-      // Encode each key-value pair
+      tempBuffers.push(new Uint8Array(lengthBuffer));
+      
+      // Encode each key-value pair into temp buffer
+      const startLength = buffers.length;
       for (const key of keys) {
         // Encode key as string (without type byte)
         const encoded = new TextEncoder().encode(key);
@@ -302,6 +324,20 @@ function encode(value) {
         // Encode value
         encodeValue(val[key]);
       }
+      // Collect encoded key-value pairs
+      const kvBuffers = buffers.splice(startLength);
+      tempBuffers.push(...kvBuffers);
+      
+      // Calculate total size of object content
+      const contentSize = tempBuffers.reduce((sum, buf) => sum + buf.length, 0);
+      
+      // Now write: TYPE + SIZE + CONTENT
+      buffers.push(new Uint8Array([TYPE.OBJECT]));
+      const sizeBuffer = new ArrayBuffer(4);
+      const sizeView = new DataView(sizeBuffer);
+      sizeView.setUint32(0, contentSize, true);
+      buffers.push(new Uint8Array(sizeBuffer));
+      buffers.push(...tempBuffers);
     } else {
       throw new Error(`Unsupported type: ${typeof val}`);
     }
@@ -415,8 +451,18 @@ function decode(data) {
       
       case TYPE.ARRAY: {
         if (offset + 4 > data.length) {
-          throw new Error('Unexpected end of data for ARRAY length');
+          throw new Error('Unexpected end of data for ARRAY size');
         }
+        // Read size in bytes
+        const sizeView = new DataView(data.buffer, data.byteOffset + offset, 4);
+        const size = sizeView.getUint32(0, true);
+        offset += 4;
+        
+        if (offset + size > data.length) {
+          throw new Error('Unexpected end of data for ARRAY content');
+        }
+        
+        // Read array length
         const lengthView = new DataView(data.buffer, data.byteOffset + offset, 4);
         const length = lengthView.getUint32(0, true);
         offset += 4;
@@ -430,8 +476,18 @@ function decode(data) {
       
       case TYPE.OBJECT: {
         if (offset + 4 > data.length) {
-          throw new Error('Unexpected end of data for OBJECT length');
+          throw new Error('Unexpected end of data for OBJECT size');
         }
+        // Read size in bytes
+        const sizeView = new DataView(data.buffer, data.byteOffset + offset, 4);
+        const size = sizeView.getUint32(0, true);
+        offset += 4;
+        
+        if (offset + size > data.length) {
+          throw new Error('Unexpected end of data for OBJECT content');
+        }
+        
+        // Read number of keys
         const lengthView = new DataView(data.buffer, data.byteOffset + offset, 4);
         const length = lengthView.getUint32(0, true);
         offset += 4;
@@ -555,7 +611,7 @@ class BJsonFile {
     this.file = await this.fileHandle.getFile();
   }
 
-  async readRange(start, length) {
+  async #readRange(start, length) {
     this.ensureOpen();
     const slice = this.file.slice(start, start + length);
     const arrayBuffer = await slice.arrayBuffer();
@@ -584,7 +640,7 @@ class BJsonFile {
     await this.refreshFile();
   }
 
-  async read() {
+  async read(pointer = 0) {
     this.ensureOpen();
     
     const fileSize = await this.getFileSize();
@@ -593,10 +649,15 @@ class BJsonFile {
       throw new Error(`File is empty: ${this.filename}`);
     }
     
-    // Read the entire file using readRange
-    const binaryData = await this.readRange(0, fileSize);
+    // Validate pointer offset
+    if (pointer < 0 || pointer >= fileSize) {
+      throw new Error(`Pointer offset ${pointer} out of file bounds [0, ${fileSize})`);
+    }
     
-    // Decode and return
+    // Read from pointer offset to end of file
+    const binaryData = await this.#readRange(pointer, fileSize - pointer);
+    
+    // Decode and return the first value
     return decode(binaryData);
   }
 
@@ -639,7 +700,7 @@ class BJsonFile {
         // Helper function to determine how many bytes a value occupies
         const getValueSize = async (readPosition) => {
           // Read 1 byte for type
-          let tempData = await this.readRange(readPosition, 1);
+          let tempData = await this.#readRange(readPosition, 1);
           let pos = 1;
           const type = tempData[0];
           
@@ -666,50 +727,26 @@ class BJsonFile {
             
             case TYPE.STRING: {
               // Read length (4 bytes)
-              tempData = await this.readRange(readPosition + 1, 4);
+              tempData = await this.#readRange(readPosition + 1, 4);
               const view = new DataView(tempData.buffer, tempData.byteOffset, 4);
               const length = view.getUint32(0, true);
               return 1 + 4 + length;
             }
             
             case TYPE.ARRAY: {
-              // Read array length (4 bytes)
-              tempData = await this.readRange(readPosition + 1, 4);
+              // Read size in bytes (4 bytes)
+              tempData = await this.#readRange(readPosition + 1, 4);
               const view = new DataView(tempData.buffer, tempData.byteOffset, 4);
-              const length = view.getUint32(0, true);
-              let size = 1 + 4; // type + length
-              let elementPos = readPosition + 5;
-              
-              for (let i = 0; i < length; i++) {
-                const elementSize = await getValueSize(elementPos);
-                size += elementSize;
-                elementPos += elementSize;
-              }
-              return size;
+              const size = view.getUint32(0, true);
+              return 1 + 4 + size; // type + size + content
             }
             
             case TYPE.OBJECT: {
-              // Read number of keys (4 bytes)
-              tempData = await this.readRange(readPosition + 1, 4);
+              // Read size in bytes (4 bytes)
+              tempData = await this.#readRange(readPosition + 1, 4);
               const view = new DataView(tempData.buffer, tempData.byteOffset, 4);
-              const numKeys = view.getUint32(0, true);
-              let size = 1 + 4; // type + length
-              let keyPos = readPosition + 5;
-              
-              for (let i = 0; i < numKeys; i++) {
-                // Read key length (4 bytes)
-                tempData = await this.readRange(keyPos, 4);
-                const keyView = new DataView(tempData.buffer, tempData.byteOffset, 4);
-                const keyLength = keyView.getUint32(0, true);
-                size += 4 + keyLength;
-                keyPos += 4 + keyLength;
-                
-                // Read value size
-                const valueSize = await getValueSize(keyPos);
-                size += valueSize;
-                keyPos += valueSize;
-              }
-              return size;
+              const size = view.getUint32(0, true);
+              return 1 + 4 + size; // type + size + content
             }
             
             default:
@@ -721,7 +758,7 @@ class BJsonFile {
         const valueSize = await getValueSize(offset);
         
         // Read only the bytes needed for this value
-        const valueData = await this.readRange(offset, valueSize);
+        const valueData = await this.#readRange(offset, valueSize);
         offset += valueSize;
         
         // Decode and yield this value

@@ -1,0 +1,621 @@
+/**
+ * On-Disk R-tree implementation using BJsonFile
+ * 
+ * This implementation stores all data in an append-only bjson file:
+ * - Nodes are stored as bjson records
+ * - Node references use Pointer objects for file offsets
+ * - Updates append new versions rather than modifying in place
+ * - An in-memory index tracks the latest offset for each node ID
+ * 
+ * File format:
+ * - Record 0: Metadata (version, maxEntries, size, rootPointer, nextId)
+ * - Records 1+: Node data (id, isLeaf, children, bbox)
+ *   - For internal nodes: children are Pointer objects to child nodes
+ *   - For leaf nodes: children are data entries with {bbox, lat, lng, data}
+ */
+
+import { BJsonFile, Pointer, encode, decode } from './bjson.js';
+
+/**
+ * Calculate distance between two points using Haversine formula
+ */
+function haversineDistance(lat1, lng1, lat2, lng2) {
+	const R = 6371; // Earth's radius in kilometers
+	const dLat = (lat2 - lat1) * Math.PI / 180;
+	const dLng = (lng2 - lng1) * Math.PI / 180;
+	const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+		Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+		Math.sin(dLng / 2) * Math.sin(dLng / 2);
+	const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+	return R * c;
+}
+
+/**
+ * Convert radius query to bounding box
+ */
+function radiusToBoundingBox(lat, lng, radiusKm) {
+	const latDelta = radiusKm / 111;
+	const lngDelta = radiusKm / (111 * Math.cos(lat * Math.PI / 180));
+	
+	return {
+		minLat: lat - latDelta,
+		maxLat: lat + latDelta,
+		minLng: lng - lngDelta,
+		maxLng: lng + lngDelta
+	};
+}
+
+/**
+ * Check if two bounding boxes intersect
+ */
+function intersects(bbox1, bbox2) {
+	return !(bbox1.maxLat < bbox2.minLat ||
+		bbox1.minLat > bbox2.maxLat ||
+		bbox1.maxLng < bbox2.minLng ||
+		bbox1.minLng > bbox2.maxLng);
+}
+
+/**
+ * Calculate the area of a bounding box
+ */
+function area(bbox) {
+	return (bbox.maxLat - bbox.minLat) * (bbox.maxLng - bbox.minLng);
+}
+
+/**
+ * Calculate the bounding box that contains both input boxes
+ */
+function union(bbox1, bbox2) {
+	return {
+		minLat: Math.min(bbox1.minLat, bbox2.minLat),
+		maxLat: Math.max(bbox1.maxLat, bbox2.maxLat),
+		minLng: Math.min(bbox1.minLng, bbox2.minLng),
+		maxLng: Math.max(bbox1.maxLng, bbox2.maxLng)
+	};
+}
+
+/**
+ * Calculate the enlargement needed to include bbox2 in bbox1
+ */
+function enlargement(bbox1, bbox2) {
+	const unionBox = union(bbox1, bbox2);
+	return area(unionBox) - area(bbox1);
+}
+
+/**
+ * R-tree node stored on disk
+ */
+class RTreeNode {
+	constructor(rtree, nodeData) {
+		this.rtree = rtree;
+		this.id = nodeData.id;
+		this.isLeaf = nodeData.isLeaf;
+		this.children = nodeData.children || [];
+		this.bbox = nodeData.bbox;
+	}
+
+	/**
+	 * Update the bounding box to contain all children
+	 */
+	async updateBBox() {
+		if (this.children.length === 0) {
+			this.bbox = null;
+			return;
+		}
+
+		let minLat = Infinity, maxLat = -Infinity;
+		let minLng = Infinity, maxLng = -Infinity;
+
+		for (const child of this.children) {
+			let bbox;
+			if (this.isLeaf) {
+				// Leaf node: children are data entries
+				bbox = child.bbox;
+			} else {
+				// Internal node: children are Pointers - need to load child nodes
+				const childNode = await this.rtree._loadNode(child);
+				bbox = childNode.bbox;
+			}
+
+			if (bbox) {
+				minLat = Math.min(minLat, bbox.minLat);
+				maxLat = Math.max(maxLat, bbox.maxLat);
+				minLng = Math.min(minLng, bbox.minLng);
+				maxLng = Math.max(maxLng, bbox.maxLng);
+			}
+		}
+
+		this.bbox = { minLat, maxLat, minLng, maxLng };
+		
+		// Save updated node to disk
+		await this.rtree._saveNode(this);
+	}
+
+	/**
+	 * Convert node to plain object for serialization
+	 */
+	toJSON() {
+		return {
+			id: this.id,
+			isLeaf: this.isLeaf,
+			children: this.children,
+			bbox: this.bbox
+		};
+	}
+}
+
+/**
+ * On-disk R-tree implementation
+ */
+export class RTree {
+	constructor(filename, maxEntries = 9) {
+		this.filename = filename;
+		this.maxEntries = maxEntries;
+		this.minEntries = Math.max(2, Math.ceil(maxEntries / 2));
+		
+		// Metadata
+		this.rootPointer = null;
+		this.nextId = 1;
+		this._size = 0;
+		
+		// BJsonFile handle
+		this.file = new BJsonFile(filename);
+		this.isOpen = false;
+	}
+
+	/**
+	 * Open the R-tree file (create if doesn't exist)
+	 */
+	async open() {
+		if (this.isOpen) {
+			throw new Error('R-tree file is already open');
+		}
+
+		const exists = await this.file.exists();
+		
+		if (exists) {
+			// Load existing tree
+			await this.file.open('rw');
+			await this._loadFromFile();
+		} else {
+			// Create new tree
+			await this.file.open('rw');
+			await this._initializeNewTree();
+		}
+		
+		this.isOpen = true;
+	}
+
+	/**
+	 * Close the R-tree file
+	 */
+	async close() {
+		if (this.isOpen) {
+			await this._writeMetadata();
+			await this.file.close();
+			this.isOpen = false;
+		}
+	}
+
+	/**
+	 * Initialize a new empty tree
+	 */
+	async _initializeNewTree() {
+		// Create root node
+		const rootNode = new RTreeNode(this, {
+			id: 0,
+			isLeaf: true,
+			children: [],
+			bbox: null
+		});
+		
+		this.nextId = 1;
+		this._size = 0;
+		
+		// Save root node
+		const rootPointer = await this._saveNode(rootNode);
+		this.rootPointer = rootPointer;
+		
+		// Write metadata as first record
+		await this._writeMetadata();
+	}
+
+	/**
+	 * Write metadata record to file
+	 */
+	async _writeMetadata() {
+		const metadata = {
+			version: 1,
+			maxEntries: this.maxEntries,
+			minEntries: this.minEntries,
+			size: this._size,
+			rootPointer: this.rootPointer ? this.rootPointer.valueOf() : null,
+			nextId: this.nextId
+		};
+		
+		// Append metadata to file (don't use write which truncates)
+		await this.file.append(metadata);
+	}
+
+	/**
+	 * Load tree from existing file
+	 */
+	async _loadFromFile() {
+		// Calculate fixed metadata size:
+		// Metadata object has 6 fields: version, maxEntries, minEntries, size, rootPointer, nextId
+		// All are INT type (5 bytes each when encoded)
+		// Object encoding: TYPE (1) + SIZE (4) + COUNT (4) + key-value pairs
+		// Total tested size: 111 bytes
+		const METADATA_SIZE = 111;
+		
+		const fileSize = await this.file.getFileSize();
+		if (fileSize < METADATA_SIZE) {
+			throw new Error('Invalid R-tree file format: file too small for metadata');
+		}
+		
+		// Read metadata from the end of the file
+		const metadataOffset = fileSize - METADATA_SIZE;
+		const metadata = await this.file.read(metadataOffset);
+		
+		this.maxEntries = metadata.maxEntries;
+		this.minEntries = metadata.minEntries;
+		this._size = metadata.size;
+		this.rootPointer = metadata.rootPointer !== null && metadata.rootPointer !== undefined 
+			? new Pointer(metadata.rootPointer) 
+			: null;
+		this.nextId = metadata.nextId;
+	}
+
+	/**
+	 * Save a node to disk and return its Pointer
+	 */
+	async _saveNode(node) {
+		const nodeData = node.toJSON();
+		
+		// Get current file size (this is where the node will be stored)
+		const offset = await this.file.getFileSize();
+		
+		// Append node to file
+		await this.file.append(nodeData);
+		
+		// Return pointer to the saved node
+		return new Pointer(offset);
+	}
+
+	/**
+	 * Load a node from disk by Pointer
+	 */
+	async _loadNode(pointer) {
+		if (!(pointer instanceof Pointer)) {
+			throw new Error('Expected Pointer object');
+		}
+		
+		const offset = pointer.valueOf();
+		
+		// Read the node from file at this offset
+		const nodeData = await this.file.read(offset);
+		
+		return new RTreeNode(this, nodeData);
+	}
+
+	/**
+	 * Load the root node
+	 */
+	async _loadRoot() {
+		return await this._loadNode(this.rootPointer);
+	}
+
+	/**
+	 * Insert a point into the R-tree
+	 */
+	async insert(lat, lng, data) {
+		if (!this.isOpen) {
+			throw new Error('R-tree file must be opened before use');
+		}
+
+		const bbox = {
+			minLat: lat,
+			maxLat: lat,
+			minLng: lng,
+			maxLng: lng
+		};
+
+		const entry = { bbox, lat, lng, data };
+		
+		const root = await this._loadRoot();
+		const result = await this._insert(entry, root, 1);
+		
+		if (result.split) {
+			// Root was split, create new root
+			const newRoot = new RTreeNode(this, {
+				id: this.nextId++,
+				isLeaf: false,
+				children: result.pointers,
+				bbox: null
+			});
+			
+			await newRoot.updateBBox();
+			this.rootPointer = await this._saveNode(newRoot);
+		} else {
+			// Root was updated but not split, update the pointer
+			this.rootPointer = result.pointer;
+		}
+		
+		this._size++;
+		await this._writeMetadata();
+	}
+
+	/**
+	 * Internal insert method - returns splitPointers if split occurred, else returns updated node pointer
+	 */
+	async _insert(entry, node, level) {
+		if (node.isLeaf) {
+			node.children.push(entry);
+			await node.updateBBox();
+
+			if (node.children.length > this.maxEntries) {
+				const [pointer1, pointer2] = await this._split(node);
+				return { split: true, pointers: [pointer1, pointer2] };
+			}
+			
+			// Save updated leaf node
+			const pointer = await this._saveNode(node);
+			return { split: false, pointer };
+		} else {
+			// Choose subtree
+			const targetPointer = await this._chooseSubtree(entry.bbox, node);
+			const targetNode = await this._loadNode(targetPointer);
+			const result = await this._insert(entry, targetNode, level + 1);
+
+			if (result.split) {
+				// Child was split, find and replace it
+				let childIndex = -1;
+				for (let i = 0; i < node.children.length; i++) {
+					if (node.children[i].valueOf() === targetPointer.valueOf()) {
+						childIndex = i;
+						break;
+					}
+				}
+				
+				if (childIndex !== -1) {
+					// Replace the old child with both new children
+					node.children[childIndex] = result.pointers[0];
+					node.children.push(result.pointers[1]);
+				} else {
+					// Shouldn't happen, but add both if we can't find
+					node.children.push(result.pointers[0]);
+					node.children.push(result.pointers[1]);
+				}
+				await node.updateBBox();
+
+				if (node.children.length > this.maxEntries) {
+					const [pointer1, pointer2] = await this._split(node);
+					return { split: true, pointers: [pointer1, pointer2] };
+				}
+			} else {
+				// Child was not split, but may have been updated with new pointer
+				// Update the child pointer in this node's children
+				let childIndex = -1;
+				for (let i = 0; i < node.children.length; i++) {
+					if (node.children[i].valueOf() === targetPointer.valueOf()) {
+						childIndex = i;
+						break;
+					}
+				}
+				
+				if (childIndex !== -1) {
+					// Update child pointer to point to the new version
+					node.children[childIndex] = result.pointer;
+				}
+				
+				// Update this node's bbox (use the current children pointers)
+				await node.updateBBox();
+			}
+			
+		// Save updated internal node
+		const pointer = await this._saveNode(node);
+		return { split: false, pointer };
+    }
+	}
+
+	/**
+	 * Choose the best subtree to insert an entry
+	 */
+	async _chooseSubtree(bbox, node) {
+		let minEnlargement = Infinity;
+		let minArea = Infinity;
+		let targetPointer = null;
+
+    for (const childPointer of node.children) {
+			// Debug: check if we have a Pointer
+			if (!(childPointer instanceof Pointer)) {
+				throw new Error(`Expected Pointer in _chooseSubtree, got: ${typeof childPointer}`);
+			}
+			
+			const childNode = await this._loadNode(childPointer);
+			const enl = enlargement(childNode.bbox, bbox);
+			const ar = area(childNode.bbox);
+
+			if (enl < minEnlargement || (enl === minEnlargement && ar < minArea)) {
+				minEnlargement = enl;
+				minArea = ar;
+				targetPointer = childPointer;
+			}
+		}
+
+		return targetPointer;
+	}
+
+	/**
+	 * Split an overflowing node
+	 */
+	async _split(node) {
+		const children = node.children;
+		const isLeaf = node.isLeaf;
+
+		// Find two seeds (most distant entries)
+		let maxDist = -Infinity;
+		let seed1Idx = 0, seed2Idx = 1;
+
+		for (let i = 0; i < children.length; i++) {
+			for (let j = i + 1; j < children.length; j++) {
+				let bbox1, bbox2;
+				
+				if (isLeaf) {
+					bbox1 = children[i].bbox;
+					bbox2 = children[j].bbox;
+				} else {
+					const node1 = await this._loadNode(children[i]);
+					const node2 = await this._loadNode(children[j]);
+					bbox1 = node1.bbox;
+					bbox2 = node2.bbox;
+				}
+				
+				const dist = area(union(bbox1, bbox2));
+				if (dist > maxDist) {
+					maxDist = dist;
+					seed1Idx = i;
+					seed2Idx = j;
+				}
+			}
+		}
+
+		// Create two new nodes
+		const node1 = new RTreeNode(this, {
+			id: this.nextId++,
+			isLeaf: isLeaf,
+			children: [children[seed1Idx]],
+			bbox: null
+		});
+
+		const node2 = new RTreeNode(this, {
+			id: this.nextId++,
+			isLeaf: isLeaf,
+			children: [children[seed2Idx]],
+			bbox: null
+		});
+
+		// Distribute remaining entries
+		for (let i = 0; i < children.length; i++) {
+			if (i === seed1Idx || i === seed2Idx) continue;
+
+			const child = children[i];
+			
+			let bbox;
+			if (isLeaf) {
+				bbox = child.bbox;
+			} else {
+				const childNode = await this._loadNode(child);
+				bbox = childNode.bbox;
+			}
+			
+			await node1.updateBBox();
+			await node2.updateBBox();
+			
+			const enl1 = node1.bbox ? enlargement(node1.bbox, bbox) : 0;
+			const enl2 = node2.bbox ? enlargement(node2.bbox, bbox) : 0;
+
+			if (enl1 < enl2) {
+				node1.children.push(child);
+			} else if (enl2 < enl1) {
+				node2.children.push(child);
+			} else {
+				// Equal enlargement, choose one with fewer children
+				if (node1.children.length <= node2.children.length) {
+					node1.children.push(child);
+				} else {
+					node2.children.push(child);
+				}
+			}
+		}
+
+		await node1.updateBBox();
+		await node2.updateBBox();
+
+		// Save both nodes (don't reuse the original node)
+		const pointer1 = await this._saveNode(node1);
+		const pointer2 = await this._saveNode(node2);
+
+		// Return both pointers
+		return [pointer1, pointer2];
+	}
+
+	/**
+	 * Search for points within a bounding box
+	 */
+	async searchBBox(bbox) {
+		if (!this.isOpen) {
+			throw new Error('R-tree file must be opened before use');
+		}
+
+		const results = [];
+		const root = await this._loadRoot();
+		await this._searchBBox(bbox, root, results);
+		return results;
+	}
+
+	/**
+	 * Internal bounding box search
+	 */
+	async _searchBBox(bbox, node, results) {
+		if (!node.bbox || !intersects(bbox, node.bbox)) {
+			return;
+		}
+
+		if (node.isLeaf) {
+			for (const entry of node.children) {
+				if (intersects(bbox, entry.bbox)) {
+					results.push(entry);
+				}
+			}
+		} else {
+			for (const childPointer of node.children) {
+				const childNode = await this._loadNode(childPointer);
+				await this._searchBBox(bbox, childNode, results);
+			}
+		}
+	}
+
+	/**
+	 * Search for points within a radius of a location
+	 */
+	async searchRadius(lat, lng, radiusKm) {
+		const bbox = radiusToBoundingBox(lat, lng, radiusKm);
+		const candidates = await this.searchBBox(bbox);
+
+		const results = [];
+		for (const entry of candidates) {
+			const dist = haversineDistance(lat, lng, entry.lat, entry.lng);
+			if (dist <= radiusKm) {
+				results.push({ ...entry, distance: dist });
+			}
+		}
+
+		return results;
+	}
+
+	/**
+	 * Get the number of entries in the tree
+	 */
+	size() {
+		return this._size;
+	}
+
+	/**
+	 * Clear all entries from the tree
+	 */
+	async clear() {
+		await this.close();
+		
+		// Delete and recreate file
+		const tempFile = new BJsonFile(this.filename);
+		await tempFile.open('rw');
+		await tempFile.delete();
+		
+		// Reinitialize
+		this.file = new BJsonFile(this.filename);
+		await this.open();
+	}
+}
+
+export default RTree;
