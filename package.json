@@ -10,6 +10,9 @@
     "./rtree": "./src/rtree.js",
     "./textindex": "./src/textindex.js"
   },
+  "bin": {
+    "bjson-decode": "./bin/bjson-decode.js"
+  },
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",

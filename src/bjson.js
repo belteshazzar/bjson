@@ -244,15 +244,15 @@ function encode(value) {
       buffers.push(new Uint8Array([TYPE.POINTER]));
       const buffer = new ArrayBuffer(8);
       const view = new DataView(buffer);
-      view.setBigInt64(0, BigInt(val.offset), true); // little-endian
+      view.setBigUint64(0, BigInt(val.offset), true); // little-endian
       buffers.push(new Uint8Array(buffer));
     } else if (typeof val === 'number') {
-      if (Number.isInteger(val) && val >= -2147483648 && val <= 2147483647) {
-        // 32-bit signed integer
+      if (Number.isInteger(val) && Number.isSafeInteger(val)) {
+        // 64-bit signed integer (stored as BigInt64)
         buffers.push(new Uint8Array([TYPE.INT]));
-        const buffer = new ArrayBuffer(4);
+        const buffer = new ArrayBuffer(8);
         const view = new DataView(buffer);
-        view.setInt32(0, val, true); // little-endian
+        view.setBigInt64(0, BigInt(val), true); // little-endian
         buffers.push(new Uint8Array(buffer));
       } else {
         // 64-bit float
@@ -384,10 +384,13 @@ function decode(data) {
         if (offset + 4 > data.length) {
           throw new Error('Unexpected end of data for INT');
         }
-        const view = new DataView(data.buffer, data.byteOffset + offset, 4);
-        const value = view.getInt32(0, true);
-        offset += 4;
-        return value;
+        const view = new DataView(data.buffer, data.byteOffset + offset, 8);
+        const value = view.getBigInt64(0, true);
+        offset += 8;
+        if (value < BigInt(Number.MIN_SAFE_INTEGER) || value > BigInt(Number.MAX_SAFE_INTEGER)) {
+          throw new Error('Decoded integer exceeds safe range');
+        }
+        return Number(value);
       }
       
       case TYPE.FLOAT: {
@@ -440,10 +443,10 @@ function decode(data) {
           throw new Error('Unexpected end of data for POINTER');
         }
         const view = new DataView(data.buffer, data.byteOffset + offset, 8);
-        const pointerOffset = view.getBigInt64(0, true);
+        const pointerOffset = view.getBigUint64(0, true);
         offset += 8;
         // Validate offset is within safe integer range
-        if (pointerOffset < 0n || pointerOffset > BigInt(Number.MAX_SAFE_INTEGER)) {
+        if (pointerOffset > BigInt(Number.MAX_SAFE_INTEGER)) {
           throw new Error('Pointer offset out of valid range');
         }
         return new Pointer(Number(pointerOffset));
@@ -640,7 +643,7 @@ class BJsonFile {
     await this.refreshFile();
   }
 
-  async read(pointer = 0) {
+  async read(pointer = new Pointer(0)) {
     this.ensureOpen();
     
     const fileSize = await this.getFileSize();
@@ -648,14 +651,16 @@ class BJsonFile {
     if (fileSize === 0) {
       throw new Error(`File is empty: ${this.filename}`);
     }
+
+    const pointerValue = pointer.valueOf();
     
     // Validate pointer offset
-    if (pointer < 0 || pointer >= fileSize) {
+    if (pointerValue < 0 || pointerValue >= fileSize) {
       throw new Error(`Pointer offset ${pointer} out of file bounds [0, ${fileSize})`);
     }
     
     // Read from pointer offset to end of file
-    const binaryData = await this.#readRange(pointer, fileSize - pointer);
+    const binaryData = await this.#readRange(pointerValue, fileSize - pointerValue);
     
     // Decode and return the first value
     return decode(binaryData);
@@ -711,19 +716,13 @@ class BJsonFile {
               return 1;
             
             case TYPE.INT:
-              return 1 + 4;
-            
             case TYPE.FLOAT:
-              return 1 + 8;
-            
-            case TYPE.OID:
-              return 1 + 12;
-            
             case TYPE.DATE:
-              return 1 + 8;
-            
             case TYPE.POINTER:
               return 1 + 8;
+
+            case TYPE.OID:
+              return 1 + 12;
             
             case TYPE.STRING: {
               // Read length (4 bytes)

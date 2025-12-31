@@ -45,8 +45,11 @@ describe.skipIf(!hasOPFS)('R-tree Node Size Handling', () => {
     const tree = new RTree('test-rtree-node-sizes.bjson', 4);
     await tree.open();
 
+    const lat = 40.7128;
+    const lng = -74.0060;
     const id = new ObjectId();
-    await tree.insert(40.7128, -74.0060, id);
+
+    await tree.insert(lat, lng, id);
     expect(tree.size()).toBe(1);
 
     // Verify it can be read back
@@ -57,7 +60,7 @@ describe.skipIf(!hasOPFS)('R-tree Node Size Handling', () => {
       maxLng: -73
     });
     expect(results).toHaveLength(1);
-    expect(results[0]).toEqual(id);
+    expect(results[0]).toEqual({objectId:id,lat,lng});
 
     await tree.close();
   });

@@ -69,9 +69,9 @@ describe('Binary JSON Encoder/Decoder', () => {
   });
 
   describe('INT', () => {
-    it('should encode integer to 5 bytes', () => {
+    it('should encode integer to 9 bytes', () => {
       const encoded = encode(42);
-      expect(encoded).toHaveLength(5);
+      expect(encoded).toHaveLength(9);
       expect(encoded[0]).toBe(TYPE.INT);
     });
 

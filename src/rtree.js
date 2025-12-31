@@ -213,8 +213,7 @@ export class RTree {
 		this._size = 0;
 		
 		// Save root node
-		const rootPointer = await this._saveNode(rootNode);
-		this.rootPointer = rootPointer;
+		this.rootPointer = await this._saveNode(rootNode);
 		
 		// Write metadata as first record
 		await this._writeMetadata();
@@ -229,7 +228,7 @@ export class RTree {
 			maxEntries: this.maxEntries,
 			minEntries: this.minEntries,
 			size: this._size,
-			rootPointer: this.rootPointer ? this.rootPointer.valueOf() : null,
+			rootPointer: this.rootPointer,
 			nextId: this.nextId
 		};
 		
@@ -243,10 +242,10 @@ export class RTree {
 	async _loadFromFile() {
 		// Calculate fixed metadata size:
 		// Metadata object has 6 fields: version, maxEntries, minEntries, size, rootPointer, nextId
-		// All are INT type (5 bytes each when encoded)
+		// All are INT type encoded as 8-byte ints (1 type byte + 8 bytes payload)
 		// Object encoding: TYPE (1) + SIZE (4) + COUNT (4) + key-value pairs
-		// Total tested size: 111 bytes
-		const METADATA_SIZE = 111;
+		// Total size with 8-byte ints: 135 bytes
+		const METADATA_SIZE = 135;
 		
 		const fileSize = await this.file.getFileSize();
 		if (fileSize < METADATA_SIZE) {
@@ -260,9 +259,7 @@ export class RTree {
 		this.maxEntries = metadata.maxEntries;
 		this.minEntries = metadata.minEntries;
 		this._size = metadata.size;
-		this.rootPointer = metadata.rootPointer !== null && metadata.rootPointer !== undefined 
-			? new Pointer(metadata.rootPointer) 
-			: null;
+		this.rootPointer = metadata.rootPointer;
 		this.nextId = metadata.nextId;
 	}
 
@@ -568,8 +565,7 @@ export class RTree {
 					results.push({
 						objectId: entry.objectId,
 						lat: entry.lat,
-						lng: entry.lng,
-						bbox: entry.bbox
+						lng: entry.lng
 					});
 				}
 			}

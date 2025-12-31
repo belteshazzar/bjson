@@ -30,6 +30,11 @@ class NodeData {
         this.keys = keys;
         this.values = values;
         this.children = children;
+        for (let v of children) {
+            if (!(v instanceof Pointer)) {
+                throw new Error('Children must be Pointer objects');
+            }
+        }
         this.next = next;
     }
 }
@@ -115,7 +120,7 @@ export class BPlusTree {
             maxEntries: this.order,  // Renamed to match RTree size
             minEntries: this.minKeys,  // Renamed to match RTree size
             size: this._size,
-            rootPointer: this.rootPointer ? this.rootPointer.valueOf() : null,
+            rootPointer: this.rootPointer,
             nextId: this.nextNodeId  // Renamed to match RTree size
         };
 
@@ -127,9 +132,8 @@ export class BPlusTree {
      */
     async _loadMetadata() {
         const fileSize = await this.file.getFileSize();
-        // Metadata object has same structure as RTree: 6 INT fields
-        // Using RTree's tested size
-        const METADATA_SIZE = 111;
+        // Metadata object has 6 INT fields (now encoded as 8-byte ints) plus keys
+        const METADATA_SIZE = 135;
         
         if (fileSize < METADATA_SIZE) {
             throw new Error('Invalid tree file');
@@ -146,9 +150,7 @@ export class BPlusTree {
         this.minKeys = metadata.minEntries;
         this._size = metadata.size;
         this.nextNodeId = metadata.nextId;
-        this.rootPointer = metadata.rootPointer !== null && metadata.rootPointer !== undefined
-            ? new Pointer(metadata.rootPointer)
-            : null;
+        this.rootPointer = metadata.rootPointer;
     }
 
     /**
@@ -168,7 +170,7 @@ export class BPlusTree {
             throw new Error('Expected Pointer object');
         }
 
-        const data = await this.file.read(pointer.valueOf());
+        const data = await this.file.read(pointer);
         return new NodeData(
             data.id,
             data.isLeaf,
