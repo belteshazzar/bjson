@@ -17,6 +17,24 @@ const STOPWORDS = new Set([
 ]);
 
 /**
+ * Tokenize text into individual words
+ * @param {string} text - The text to tokenize
+ * @returns {string[]} Array of words
+ */
+export function tokenize(text) {
+  if (typeof text !== 'string') {
+    return [];
+  }
+  // Split on non-word characters and filter out empty strings
+  const words = text.toLowerCase()
+    .split(/\W+/)
+    .filter(word => word.length > 0);
+  
+  // Filter stop words
+  return words.filter(word => !STOPWORDS.has(word));
+}
+
+/**
  * TextIndex - A text index implementation using Porter stemmer algorithm
  * 
  * This class provides full-text search capabilities by indexing terms
@@ -73,24 +91,6 @@ export class TextIndex {
   }
 
   /**
-   * Tokenize text into individual words
-   * @param {string} text - The text to tokenize
-   * @returns {string[]} Array of words
-   */
-  _tokenize(text) {
-    if (typeof text !== 'string') {
-      return [];
-    }
-    // Split on non-word characters and filter out empty strings
-    const words = text.toLowerCase()
-      .split(/\W+/)
-      .filter(word => word.length > 0);
-    
-    // Filter stop words
-    return words.filter(word => !STOPWORDS.has(word));
-  }
-
-  /**
    * Add terms from text to the index for a given document ID
    * @param {string} docId - The document identifier
    * @param {string} text - The text content to index
@@ -102,7 +102,7 @@ export class TextIndex {
       throw new Error('Document ID is required');
     }
 
-    const words = this._tokenize(text);
+    const words = tokenize(text);
     const termFrequency = new Map();
 
     words.forEach(word => {
@@ -168,7 +168,7 @@ export class TextIndex {
   async query(queryText, options = { scored: true, requireAll: false }) {
     this._ensureOpen();
 
-    const words = this._tokenize(queryText);
+    const words = tokenize(queryText);
     if (words.length === 0) {
       return [];
     }
