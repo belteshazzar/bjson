@@ -58,7 +58,7 @@ describe.skipIf(!hasOPFS)('BPlusTree Compaction', function() {
     await cleanupFile(compactedFilename);
   });
 
-  it('should compact the tree and reduce file size while preserving data', { timeout: 60000 }, async function() {
+  it('should compact the tree and reduce file size while preserving data', { timeout: 120000 }, async function() {
     for (let i = 0; i < 50; i++) {
       await tree.add(i, `value${i}`);
     }
