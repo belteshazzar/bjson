@@ -30,5 +30,8 @@
     "node-opfs": "github:belteshazzar/node-opfs",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "stemmer": "^2.0.1"
   }
 }
