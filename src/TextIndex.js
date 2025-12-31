@@ -292,4 +292,46 @@ export class TextIndex {
     }
   }
 
+  /**
+   * Compact all internal B+ trees into new files and switch the index to use them.
+   * @param {string} destinationBase - Base filename (without suffixes) for the compacted files
+   * @returns {Promise<{terms: object, documents: object, lengths: object}>}
+   */
+  async compact(destinationBase = `${this.baseFilename}-compact-${Date.now()}`) {
+    this._ensureOpen();
+
+    if (!destinationBase) {
+      throw new Error('Destination base filename is required for compaction');
+    }
+
+    const termsDest = `${destinationBase}-terms.bjson`;
+    const documentsDest = `${destinationBase}-documents.bjson`;
+    const lengthsDest = `${destinationBase}-lengths.bjson`;
+
+    const results = await Promise.all([
+      this.index.compact(termsDest),
+      this.documentTerms.compact(documentsDest),
+      this.documentLengths.compact(lengthsDest)
+    ]);
+
+    const indexOrder = this.index.order;
+    const documentsOrder = this.documentTerms.order;
+    const lengthsOrder = this.documentLengths.order;
+
+    await this.close();
+
+    this.baseFilename = destinationBase;
+    this.index = new BPlusTree(termsDest, indexOrder);
+    this.documentTerms = new BPlusTree(documentsDest, documentsOrder);
+    this.documentLengths = new BPlusTree(lengthsDest, lengthsOrder);
+
+    await this.open();
+
+    return {
+      terms: results[0],
+      documents: results[1],
+      lengths: results[2]
+    };
+  }
+
 }
