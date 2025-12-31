@@ -10,6 +10,13 @@ export default defineConfig({
       reporter: ['text', 'json', 'html'],
       include: ['src/**/*.js'],
       exclude: ['node_modules/', 'test/']
+    },
+    browser: {
+      enabled: false, // Enable with --browser flag or test:browser script
+      name: 'chromium',
+      provider: 'playwright',
+      headless: true,
+      screenshotOnFailure: false
     }
   }
 });

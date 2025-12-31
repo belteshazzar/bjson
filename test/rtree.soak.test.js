@@ -9,6 +9,9 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { RTree } from '../src/rtree.js';
 import { BJsonFile } from '../src/bjson.js';
 
+// Detect if running in browser
+const isBrowser = typeof navigator !== 'undefined' && typeof process === 'undefined';
+
 // Set up node-opfs for Node.js environment
 let hasOPFS = false;
 try {
@@ -350,7 +353,7 @@ describe.skipIf(!hasOPFS)('R-tree Soak Tests', { timeout: 30000 }, () => {
     await tree.close();
   });
 
-  it('should measure memory usage', async () => {
+  it.skipIf(isBrowser)('should measure memory usage', async () => {
     const tree = new RTree('test-rtree-soak.bjson', 4);
     await tree.open();
 
