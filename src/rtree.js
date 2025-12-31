@@ -541,7 +541,7 @@ export class RTree {
 	}
 
 	/**
-	 * Search for points within a bounding box, returning ObjectIds
+	 * Search for points within a bounding box, returning entries with coords
 	 */
 	async searchBBox(bbox) {
 		if (!this.isOpen) {
@@ -565,7 +565,12 @@ export class RTree {
 		if (node.isLeaf) {
 			for (const entry of node.children) {
 				if (intersects(bbox, entry.bbox)) {
-					results.push(entry.objectId);
+					results.push({
+						objectId: entry.objectId,
+						lat: entry.lat,
+						lng: entry.lng,
+						bbox: entry.bbox
+					});
 				}
 			}
 		} else {
@@ -589,7 +594,12 @@ export class RTree {
 		for (const entry of entries) {
 			const dist = haversineDistance(lat, lng, entry.lat, entry.lng);
 			if (dist <= radiusKm) {
-				results.push({ objectId: entry.objectId, distance: dist });
+				results.push({
+					objectId: entry.objectId,
+					lat: entry.lat,
+					lng: entry.lng,
+					distance: dist
+				});
 			}
 		}
 

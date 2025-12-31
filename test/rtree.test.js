@@ -91,7 +91,9 @@ describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
 
     const results = await tree.searchBBox(bbox);
     expect(results).toHaveLength(1);
-    expect(results[0]).toEqual(idNY);
+    expect(results[0].objectId).toEqual(idNY);
+    expect(results[0].lat).toBeCloseTo(40.7128);
+    expect(results[0].lng).toBeCloseTo(-74.0060);
 
     await tree.close();
   });
@@ -111,9 +113,15 @@ describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
     const results = await tree.searchRadius(40.7128, -74.0060, 100);
     expect(results).toHaveLength(1);
     expect(results[0].objectId).toEqual(idNY);
+    expect(results[0].lat).toBeCloseTo(40.7128);
+    expect(results[0].lng).toBeCloseTo(-74.0060);
 
     const largeResults = await tree.searchRadius(40.7128, -74.0060, 5000);
     expect(largeResults).toHaveLength(3);
+    const largeIds = largeResults.map(r => r.objectId);
+    expect(largeIds).toContainEqual(idNY);
+    expect(largeIds).toContainEqual(idLA);
+    expect(largeIds).toContainEqual(idCH);
 
     await tree.close();
   });
@@ -148,7 +156,7 @@ describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
 
     const results = await tree2.searchBBox(bbox);
     expect(results).toHaveLength(1);
-    expect(results[0]).toEqual(idNY);
+    expect(results[0].objectId).toEqual(idNY);
 
     await tree2.close();
   });
@@ -242,9 +250,10 @@ describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
     });
 
     expect(results).toHaveLength(2);
-    expect(results).toContainEqual(id1);
-    expect(results).toContainEqual(id3);
-    expect(results).not.toContainEqual(id2);
+    const idsAfterRemoval = results.map(r => r.objectId);
+    expect(idsAfterRemoval).toContainEqual(id1);
+    expect(idsAfterRemoval).toContainEqual(id3);
+    expect(idsAfterRemoval).not.toContainEqual(id2);
 
     await tree.close();
   });
@@ -349,8 +358,9 @@ describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
     });
 
     expect(results).toHaveLength(4);
+    const remainingIds = results.map(r => r.objectId);
     for (let i = 6; i < 10; i++) {
-      expect(results).toContainEqual(ids[i]);
+      expect(remainingIds).toContainEqual(ids[i]);
     }
 
     await tree.close();
@@ -401,11 +411,12 @@ describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
     });
 
     expect(results).toHaveLength(3);
-    expect(results).toContainEqual(ids[0]); // First entry
-    expect(results).not.toContainEqual(ids[1]); // Removed
-    expect(results).not.toContainEqual(ids[2]); // Removed
-    expect(results).toContainEqual(ids[3]); // Fourth entry
-    expect(results).toContainEqual(ids[4]); // Fifth entry
+    const mixedIds = results.map(r => r.objectId);
+    expect(mixedIds).toContainEqual(ids[0]); // First entry
+    expect(mixedIds).not.toContainEqual(ids[1]); // Removed
+    expect(mixedIds).not.toContainEqual(ids[2]); // Removed
+    expect(mixedIds).toContainEqual(ids[3]); // Fourth entry
+    expect(mixedIds).toContainEqual(ids[4]); // Fifth entry
 
     await tree.close();
   });
@@ -457,10 +468,11 @@ describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
     });
 
     expect(results).toHaveLength(3);
-    expect(results).toContainEqual(ids[0]);
-    expect(results).not.toContainEqual(ids[1]);
-    expect(results).toContainEqual(ids[2]);
-    expect(results).toContainEqual(ids[3]);
+    const persistedIds = results.map(r => r.objectId);
+    expect(persistedIds).toContainEqual(ids[0]);
+    expect(persistedIds).not.toContainEqual(ids[1]);
+    expect(persistedIds).toContainEqual(ids[2]);
+    expect(persistedIds).toContainEqual(ids[3]);
 
     await tree3.close();
   });
