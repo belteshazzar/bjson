@@ -213,4 +213,255 @@ describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
 
     await tree.close();
   });
+
+  it('should remove a single entry', async () => {
+    const tree = new RTree('test-rtree.bjson', 4);
+    await tree.open();
+
+    const id1 = new ObjectId();
+    const id2 = new ObjectId();
+    const id3 = new ObjectId();
+    
+    await tree.insert(40.7128, -74.0060, id1);
+    await tree.insert(34.0522, -118.2437, id2);
+    await tree.insert(41.8781, -87.6298, id3);
+
+    expect(tree.size()).toBe(3);
+
+    // Remove one entry
+    const removed = await tree.remove(id2);
+    expect(removed).toBe(true);
+    expect(tree.size()).toBe(2);
+
+    // Verify id2 is gone but others remain
+    const results = await tree.searchBBox({
+      minLat: 25,
+      maxLat: 45,
+      minLng: -125,
+      maxLng: -70
+    });
+
+    expect(results).toHaveLength(2);
+    expect(results).toContainEqual(id1);
+    expect(results).toContainEqual(id3);
+    expect(results).not.toContainEqual(id2);
+
+    await tree.close();
+  });
+
+  it('should return false when removing non-existent entry', async () => {
+    const tree = new RTree('test-rtree.bjson', 4);
+    await tree.open();
+
+    const id1 = new ObjectId();
+    const id2 = new ObjectId();
+    
+    await tree.insert(40.7128, -74.0060, id1);
+
+    // Try to remove non-existent id
+    const removed = await tree.remove(id2);
+    expect(removed).toBe(false);
+    expect(tree.size()).toBe(1);
+
+    await tree.close();
+  });
+
+  it('should remove all entries one by one', async () => {
+    const tree = new RTree('test-rtree.bjson', 4);
+    await tree.open();
+
+    const ids = [];
+    const cities = [
+      { lat: 40.7128, lng: -74.0060 },
+      { lat: 34.0522, lng: -118.2437 },
+      { lat: 41.8781, lng: -87.6298 }
+    ];
+
+    for (const city of cities) {
+      const id = new ObjectId();
+      ids.push(id);
+      await tree.insert(city.lat, city.lng, id);
+    }
+
+    expect(tree.size()).toBe(3);
+
+    // Remove all entries
+    for (const id of ids) {
+      const removed = await tree.remove(id);
+      expect(removed).toBe(true);
+    }
+
+    expect(tree.size()).toBe(0);
+
+    const results = await tree.searchBBox({
+      minLat: 25,
+      maxLat: 45,
+      minLng: -125,
+      maxLng: -70
+    });
+
+    expect(results).toHaveLength(0);
+
+    await tree.close();
+  });
+
+  it('should handle removal causing node underflow and merging', async () => {
+    const tree = new RTree('test-rtree.bjson', 4);
+    await tree.open();
+
+    // Insert enough entries to force splits, creating internal nodes
+    const cities = [
+      { lat: 40.7128, lng: -74.0060 },
+      { lat: 34.0522, lng: -118.2437 },
+      { lat: 41.8781, lng: -87.6298 },
+      { lat: 29.7604, lng: -95.3698 },
+      { lat: 33.4484, lng: -112.0740 },
+      { lat: 39.9526, lng: -75.1652 },
+      { lat: 29.4241, lng: -98.4936 },
+      { lat: 32.7157, lng: -117.1611 },
+      { lat: 37.7749, lng: -122.4194 },
+      { lat: 47.6062, lng: -122.3321 }
+    ];
+
+    const ids = [];
+    for (const city of cities) {
+      const id = new ObjectId();
+      ids.push(id);
+      await tree.insert(city.lat, city.lng, id);
+    }
+
+    expect(tree.size()).toBe(10);
+
+    // Remove several entries to trigger underflow and merging
+    for (let i = 0; i < 6; i++) {
+      const removed = await tree.remove(ids[i]);
+      expect(removed).toBe(true);
+    }
+
+    expect(tree.size()).toBe(4);
+
+    // Verify remaining entries are still searchable
+    const results = await tree.searchBBox({
+      minLat: 25,
+      maxLat: 50,
+      minLng: -125,
+      maxLng: -70
+    });
+
+    expect(results).toHaveLength(4);
+    for (let i = 6; i < 10; i++) {
+      expect(results).toContainEqual(ids[i]);
+    }
+
+    await tree.close();
+  });
+
+  it('should maintain tree integrity after mixed insertions and removals', async () => {
+    const tree = new RTree('test-rtree.bjson', 4);
+    await tree.open();
+
+    const cities = [
+      { lat: 40.7128, lng: -74.0060 },
+      { lat: 34.0522, lng: -118.2437 },
+      { lat: 41.8781, lng: -87.6298 },
+      { lat: 29.7604, lng: -95.3698 },
+      { lat: 33.4484, lng: -112.0740 }
+    ];
+
+    const ids = [];
+
+    // Insert first 3
+    for (let i = 0; i < 3; i++) {
+      const id = new ObjectId();
+      ids.push(id);
+      await tree.insert(cities[i].lat, cities[i].lng, id);
+    }
+
+    // Remove middle one
+    await tree.remove(ids[1]);
+
+    // Insert 2 more
+    for (let i = 3; i < 5; i++) {
+      const id = new ObjectId();
+      ids.push(id);
+      await tree.insert(cities[i].lat, cities[i].lng, id);
+    }
+
+    // Remove another
+    await tree.remove(ids[2]);
+
+    expect(tree.size()).toBe(3);
+
+    // Verify correct entries remain
+    const results = await tree.searchBBox({
+      minLat: 25,
+      maxLat: 50,
+      minLng: -125,
+      maxLng: -70
+    });
+
+    expect(results).toHaveLength(3);
+    expect(results).toContainEqual(ids[0]); // First entry
+    expect(results).not.toContainEqual(ids[1]); // Removed
+    expect(results).not.toContainEqual(ids[2]); // Removed
+    expect(results).toContainEqual(ids[3]); // Fourth entry
+    expect(results).toContainEqual(ids[4]); // Fifth entry
+
+    await tree.close();
+  });
+
+  it('should handle removal in persisted tree', async () => {
+    // Create and insert
+    const tree1 = new RTree('test-rtree.bjson', 4);
+    await tree1.open();
+
+    const ids = [];
+    const cities = [
+      { lat: 40.7128, lng: -74.0060 },
+      { lat: 34.0522, lng: -118.2437 },
+      { lat: 41.8781, lng: -87.6298 },
+      { lat: 29.7604, lng: -95.3698 }
+    ];
+
+    for (const city of cities) {
+      const id = new ObjectId();
+      ids.push(id);
+      await tree1.insert(city.lat, city.lng, id);
+    }
+
+    await tree1.close();
+
+    // Reopen and remove
+    const tree2 = new RTree('test-rtree.bjson');
+    await tree2.open();
+    
+    expect(tree2.size()).toBe(4);
+    
+    const removed = await tree2.remove(ids[1]);
+    expect(removed).toBe(true);
+    expect(tree2.size()).toBe(3);
+
+    await tree2.close();
+
+    // Reopen again and verify
+    const tree3 = new RTree('test-rtree.bjson');
+    await tree3.open();
+    
+    expect(tree3.size()).toBe(3);
+
+    const results = await tree3.searchBBox({
+      minLat: 25,
+      maxLat: 50,
+      minLng: -125,
+      maxLng: -70
+    });
+
+    expect(results).toHaveLength(3);
+    expect(results).toContainEqual(ids[0]);
+    expect(results).not.toContainEqual(ids[1]);
+    expect(results).toContainEqual(ids[2]);
+    expect(results).toContainEqual(ids[3]);
+
+    await tree3.close();
+  });
 });

@@ -619,6 +619,238 @@ export class RTree {
 	}
 
 	/**
+	 * Remove an entry from the R-tree by ObjectId
+	 */
+	async remove(objectId) {
+		if (!this.isOpen) {
+			throw new Error('R-tree file must be opened before use');
+		}
+
+		const root = await this._loadRoot();
+		const result = await this._remove(objectId, root);
+
+		if (!result.found) {
+			return false; // Entry not found
+		}
+
+		if (result.underflow && result.children) {
+			// Root underflowed and has children
+			if (result.children.length === 0) {
+				// Tree is now empty, create new empty root
+				const newRoot = new RTreeNode(this, {
+					id: this.nextId++,
+					isLeaf: true,
+					children: [],
+					bbox: null
+				});
+				this.rootPointer = await this._saveNode(newRoot);
+			} else if (result.children.length === 1 && !result.isLeaf) {
+				// Root has only one child and is internal node - make child the new root
+				this.rootPointer = result.children[0];
+			} else {
+				// Root underflowed but still has multiple children, save it
+				const newRoot = new RTreeNode(this, {
+					id: root.id,
+					isLeaf: result.isLeaf,
+					children: result.children,
+					bbox: null
+				});
+				await newRoot.updateBBox();
+				this.rootPointer = await this._saveNode(newRoot);
+			}
+		} else if (result.pointer) {
+			// Root was updated
+			this.rootPointer = result.pointer;
+		}
+
+		this._size--;
+		await this._writeMetadata();
+		return true;
+	}
+
+	/**
+	 * Internal remove method
+	 * Returns: { found: boolean, underflow: boolean, pointer: Pointer, children: Array, isLeaf: boolean }
+	 */
+	async _remove(objectId, node) {
+		if (node.isLeaf) {
+			// Find and remove the entry
+			const initialLength = node.children.length;
+			node.children = node.children.filter(entry => 
+				!entry.objectId.equals(objectId)
+			);
+
+			if (node.children.length === initialLength) {
+				// Entry not found
+				return { found: false };
+			}
+
+			await node.updateBBox();
+			const pointer = await this._saveNode(node);
+
+			// Check for underflow
+			const underflow = node.children.length < this.minEntries && node.children.length > 0;
+			
+			return {
+				found: true,
+				underflow,
+				pointer,
+				children: node.children,
+				isLeaf: true
+			};
+		} else {
+			// Internal node - search children
+			let found = false;
+			let updatedChildren = [...node.children];
+
+			for (let i = 0; i < updatedChildren.length; i++) {
+				const childPointer = updatedChildren[i];
+				const childNode = await this._loadNode(childPointer);
+
+				// Check if the child's bbox could contain the entry
+				// For internal nodes, we need to check all children since we don't store exact coordinates
+				const result = await this._remove(objectId, childNode);
+
+				if (result.found) {
+					found = true;
+
+					if (result.underflow) {
+						// Child underflowed, try to handle it
+						const handled = await this._handleUnderflow(node, i, childNode, result);
+						
+						if (handled.merged) {
+							// Node was merged or redistributed, update children array
+							updatedChildren = handled.children;
+						} else {
+							// Just update the pointer
+							updatedChildren[i] = result.pointer;
+						}
+					} else {
+						// Update child pointer
+						updatedChildren[i] = result.pointer;
+					}
+
+					// Update this node
+					const updatedNode = new RTreeNode(this, {
+						id: node.id,
+						isLeaf: false,
+						children: updatedChildren,
+						bbox: null
+					});
+					await updatedNode.updateBBox();
+					const pointer = await this._saveNode(updatedNode);
+
+					// Check if this node now underflows
+					const underflow = updatedChildren.length < this.minEntries && updatedChildren.length > 0;
+
+					return {
+						found: true,
+						underflow,
+						pointer,
+						children: updatedChildren,
+						isLeaf: false
+					};
+				}
+			}
+
+			// Entry not found in any child
+			return { found: false };
+		}
+	}
+
+	/**
+	 * Handle underflow in a child node by merging or redistributing
+	 */
+	async _handleUnderflow(parentNode, childIndex, childNode, childResult) {
+		const siblings = [];
+
+		// Find siblings (nodes before and after)
+		if (childIndex > 0) {
+			const prevPointer = parentNode.children[childIndex - 1];
+			const prevNode = await this._loadNode(prevPointer);
+			siblings.push({ index: childIndex - 1, node: prevNode, pointer: prevPointer });
+		}
+		if (childIndex < parentNode.children.length - 1) {
+			const nextPointer = parentNode.children[childIndex + 1];
+			const nextNode = await this._loadNode(nextPointer);
+			siblings.push({ index: childIndex + 1, node: nextNode, pointer: nextPointer });
+		}
+
+		// Try to borrow from a sibling
+		for (const sibling of siblings) {
+			if (sibling.node.children.length > this.minEntries) {
+				// Sibling has extra entries, redistribute
+				const allChildren = [
+					...childResult.children,
+					...sibling.node.children
+				];
+
+				const mid = Math.ceil(allChildren.length / 2);
+				const newChild1Children = allChildren.slice(0, mid);
+				const newChild2Children = allChildren.slice(mid);
+
+				const newChild1 = new RTreeNode(this, {
+					id: childNode.id,
+					isLeaf: childResult.isLeaf,
+					children: newChild1Children,
+					bbox: null
+				});
+				await newChild1.updateBBox();
+
+				const newChild2 = new RTreeNode(this, {
+					id: sibling.node.id,
+					isLeaf: sibling.node.isLeaf,
+					children: newChild2Children,
+					bbox: null
+				});
+				await newChild2.updateBBox();
+
+				const pointer1 = await this._saveNode(newChild1);
+				const pointer2 = await this._saveNode(newChild2);
+
+				// Update parent's children
+				const newChildren = [...parentNode.children];
+				const minIndex = Math.min(childIndex, sibling.index);
+				const maxIndex = Math.max(childIndex, sibling.index);
+				
+				newChildren[minIndex] = pointer1;
+				newChildren[maxIndex] = pointer2;
+
+				return { merged: true, children: newChildren };
+			}
+		}
+
+		// Can't borrow, merge with a sibling
+		if (siblings.length > 0) {
+			const sibling = siblings[0];
+			const mergedChildren = [
+				...childResult.children,
+				...sibling.node.children
+			];
+
+			const mergedNode = new RTreeNode(this, {
+				id: this.nextId++,
+				isLeaf: childResult.isLeaf,
+				children: mergedChildren,
+				bbox: null
+			});
+			await mergedNode.updateBBox();
+			const mergedPointer = await this._saveNode(mergedNode);
+
+			// Update parent's children - remove both old nodes, add merged
+			const newChildren = parentNode.children.filter((_, i) => 
+				i !== childIndex && i !== sibling.index
+			);
+			newChildren.push(mergedPointer);
+
+			return { merged: true, children: newChildren };
+		}
+
+		// No siblings (shouldn't happen except for root)
+		return { merged: false };
+	}
+
+	/**
 	 * Get the number of entries in the tree
 	 */
 	size() {
