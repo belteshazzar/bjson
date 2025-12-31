@@ -486,4 +486,45 @@ export class BPlusTree {
 
         return height;
     }
+
+    /**
+     * Compact the tree into a new file by copying only the current live nodes.
+     * Returns size metrics so callers can see how much space was reclaimed.
+     * @param {string} destinationFilename - New file to write the compacted tree into
+     * @returns {Promise<{oldSize:number,newSize:number,bytesSaved:number,newFilename:string}>}
+     */
+    async compact(destinationFilename) {
+        if (!this.isOpen) {
+            throw new Error('Tree file is not open');
+        }
+        if (!destinationFilename) {
+            throw new Error('Destination filename is required for compaction');
+        }
+
+        // Make sure the current file has up-to-date metadata before measuring size
+        await this._saveMetadata();
+        const oldSize = await this.file.getFileSize();
+
+        // Rebuild a fresh tree with only the live entries
+        const entries = await this.toArray();
+        const newTree = new BPlusTree(destinationFilename, this.order);
+        await newTree.open();
+        for (const entry of entries) {
+            await newTree.add(entry.key, entry.value);
+        }
+        await newTree.close();
+
+        // Measure new file size after metadata has been written on close
+        const tempFile = new BJsonFile(destinationFilename);
+        await tempFile.open('r');
+        const newSize = await tempFile.getFileSize();
+        await tempFile.close();
+
+        return {
+            oldSize,
+            newSize,
+            bytesSaved: Math.max(0, oldSize - newSize),
+            newFilename: destinationFilename
+        };
+    }
 }
