@@ -335,3 +335,6 @@ export class TextIndex {
   }
 
 }
+
+// Re-export the stemmer so consumers can share the exact same implementation
+export { stemmer };
