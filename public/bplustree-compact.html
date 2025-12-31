@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BPlusTree Compaction (Browser)</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; line-height: 1.5; }
+    button { padding: 8px 14px; font-size: 14px; cursor: pointer; }
+    pre { background: #f4f4f4; padding: 12px; border-radius: 6px; overflow: auto; }
+    .log { margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <h1>BPlusTree Compaction (Browser)</h1>
+  <p>This demo uses OPFS in the browser to create a B+ tree, compact it, and show the contents before and after.</p>
+  <p><strong>Requirement:</strong> Chrome 102+ (OPFS available). If unsupported, an error will be shown.</p>
+  <button id="run">Run Demo</button>
+  <div class="log">
+    <pre id="output"></pre>
+  </div>
+
+  <script type="module">
+    import { BPlusTree } from '/src/bplustree.js';
+
+    const output = document.getElementById('output');
+    const runBtn = document.getElementById('run');
+
+    function log(line) {
+      output.textContent += `${line}\n`;
+    }
+
+    async function cleanup(file) {
+      const root = await navigator.storage.getDirectory();
+      try {
+        await root.removeEntry(file);
+      } catch (err) {
+        // Ignore if missing
+      }
+    }
+
+    async function runDemo() {
+      output.textContent = '';
+
+      if (!navigator.storage || !navigator.storage.getDirectory) {
+        log('OPFS not supported in this browser.');
+        return;
+      }
+
+      const filename = 'browser-bplustree.bjson';
+      const compacted = 'browser-bplustree-compacted.bjson';
+
+      await cleanup(filename);
+      await cleanup(compacted);
+
+      const tree = new BPlusTree(filename, 4);
+      await tree.open();
+
+      await tree.add('alpha', { id: 1, label: 'first' });
+      await tree.add('beta', { id: 2, label: 'second' });
+      await tree.add('gamma', { id: 3, label: 'third' });
+
+      const before = await tree.toArray();
+      log('Original entries:');
+      log(JSON.stringify(before, null, 2));
+
+      const stats = await tree.compact(compacted);
+      log('Compaction stats:');
+      log(JSON.stringify(stats, null, 2));
+
+      await tree.close();
+
+      const newTree = new BPlusTree(compacted, 4);
+      await newTree.open();
+      const after = await newTree.toArray();
+      log('Compacted entries:');
+      log(JSON.stringify(after, null, 2));
+      await newTree.close();
+    }
+
+    runBtn.addEventListener('click', () => runDemo().catch((err) => {
+      log(`Error: ${err.message || err}`);
+      console.error(err);
+    }));
+  </script>
+</body>
+</html>

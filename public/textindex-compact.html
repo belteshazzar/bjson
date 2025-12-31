@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TextIndex Compaction (Browser)</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; line-height: 1.5; }
+    button { padding: 8px 14px; font-size: 14px; cursor: pointer; }
+    pre { background: #f4f4f4; padding: 12px; border-radius: 6px; overflow: auto; }
+    .log { margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <h1>TextIndex Compaction (Browser)</h1>
+  <p>This demo uses OPFS in the browser to create a text index, compact it, and show search results before and after.</p>
+  <p><strong>Requirement:</strong> Chrome 102+ (OPFS available). If unsupported, an error will be shown.</p>
+  <button id="run">Run Demo</button>
+  <div class="log">
+    <pre id="output"></pre>
+  </div>
+
+  <script type="module">
+    import { TextIndex } from '/src/textindex.js';
+
+    const output = document.getElementById('output');
+    const runBtn = document.getElementById('run');
+
+    function log(line) {
+      output.textContent += `${line}\n`;
+    }
+
+    async function cleanupBase(baseName) {
+      const root = await navigator.storage.getDirectory();
+      const files = [
+        `${baseName}-terms.bjson`,
+        `${baseName}-documents.bjson`,
+        `${baseName}-lengths.bjson`
+      ];
+
+      for (const file of files) {
+        try {
+          await root.removeEntry(file);
+        } catch (err) {
+          // Ignore if missing
+        }
+      }
+    }
+
+    async function runDemo() {
+      output.textContent = '';
+
+      if (!navigator.storage || !navigator.storage.getDirectory) {
+        log('OPFS not supported in this browser.');
+        return;
+      }
+
+      const baseName = 'browser-text-index';
+      const compactBase = 'browser-text-index-compacted';
+
+      await cleanupBase(baseName);
+      await cleanupBase(compactBase);
+
+      const index = new TextIndex({ baseFilename: baseName, order: 8 });
+      await index.open();
+
+      await index.add('doc1', 'The quick brown fox jumps over the lazy dog');
+      await index.add('doc2', 'Lazy dogs nap in the sun');
+      await index.add('doc3', 'A fast fox outruns every dog in the park');
+
+      log('=== Before Compaction ===');
+      const before = await index.query('fox dog', { scored: false });
+      log(`Query "fox dog": ${JSON.stringify(before)}`);
+
+      const result = await index.compact(compactBase);
+      log('\n=== Compaction Stats ===');
+      log(JSON.stringify(result, null, 2));
+
+      log('\n=== After Compaction ===');
+      const after = await index.query('fox dog', { scored: false });
+      log(`Query "fox dog": ${JSON.stringify(after)}`);
+
+      await index.add('doc4', 'Foxes and dogs share the trail');
+      const post = await index.query('fox', { scored: false });
+      log(`\nAfter adding doc4, query "fox": ${JSON.stringify(post)}`);
+
+      await index.close();
+    }
+
+    runBtn.addEventListener('click', () => runDemo().catch((err) => {
+      log(`Error: ${err.message || err}`);
+      console.error(err);
+    }));
+  </script>
+</body>
+</html>

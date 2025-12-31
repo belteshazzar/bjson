@@ -4,12 +4,18 @@
   "description": "A compact binary encoding format for JSON data with support for Origin Private File System (OPFS) in browsers",
   "main": "src/bjson.js",
   "type": "module",
+  "exports": {
+    ".": "./src/bjson.js",
+    "./bplustree": "./src/bplustree.js",
+    "./rtree": "./src/rtree.js",
+    "./textindex": "./src/textindex.js"
+  },
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage",
-    "serve": "http-server -c-1 public"
+    "serve": "http-server -c-1 ."
   },
   "keywords": [
     "binary",
