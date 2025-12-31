@@ -640,6 +640,86 @@ export class RTree {
 		this.file = new BJsonFile(this.filename);
 		await this.open();
 	}
+
+		/**
+		 * Compact the R-tree by copying the current root and all reachable nodes into a new file.
+		 * Returns size metrics to show reclaimed space.
+		 * @param {string} destinationFilename
+		 */
+		async compact(destinationFilename) {
+			if (!this.isOpen) {
+				throw new Error('R-tree file must be opened before use');
+			}
+			if (!destinationFilename) {
+				throw new Error('Destination filename is required for compaction');
+			}
+
+			// Flush current metadata so size reflects latest state
+			await this._writeMetadata();
+			const oldSize = await this.file.getFileSize();
+
+			const dest = new RTree(destinationFilename, this.maxEntries);
+			dest.minEntries = this.minEntries;
+			dest.nextId = this.nextId;
+			dest._size = this._size;
+
+			await dest.file.open('rw');
+			dest.isOpen = true;
+
+			const pointerMap = new Map();
+
+			const cloneNode = async (pointer) => {
+				const offset = pointer.valueOf();
+				if (pointerMap.has(offset)) {
+					return pointerMap.get(offset);
+				}
+
+				const sourceNode = await this._loadNode(pointer);
+				const clonedChildren = [];
+
+				if (sourceNode.isLeaf) {
+					// Leaf children are plain entries
+					for (const child of sourceNode.children) {
+						clonedChildren.push(child);
+					}
+				} else {
+					for (const childPointer of sourceNode.children) {
+						const newChildPtr = await cloneNode(childPointer);
+						clonedChildren.push(newChildPtr);
+					}
+				}
+
+				const clonedNode = new RTreeNode(dest, {
+					id: sourceNode.id,
+					isLeaf: sourceNode.isLeaf,
+					children: clonedChildren,
+					bbox: sourceNode.bbox
+				});
+
+				const newPointer = await dest._saveNode(clonedNode);
+				pointerMap.set(offset, newPointer);
+				return newPointer;
+			};
+
+			const newRootPointer = await cloneNode(this.rootPointer);
+			dest.rootPointer = newRootPointer;
+
+			await dest._writeMetadata();
+			await dest.file.close();
+			dest.isOpen = false;
+
+			const tempFile = new BJsonFile(destinationFilename);
+			await tempFile.open('r');
+			const newSize = await tempFile.getFileSize();
+			await tempFile.close();
+
+			return {
+				oldSize,
+				newSize,
+				bytesSaved: Math.max(0, oldSize - newSize),
+				newFilename: destinationFilename
+			};
+		}
 }
 
 export default RTree;
