@@ -81,7 +81,7 @@ ${pad}]`;
       const entries = Object.entries(val);
       if (entries.length === 0) return '{}';
       const inner = entries
-        .map(([k, v]) => `${nextPad}${JSON.stringify(k)}: ${render(v, depth + 1)}`)
+        .map(([k, v]) => `${nextPad}${k}: ${render(v, depth + 1)}`)
         .join('\n');
       return `{
 ${inner}
@@ -116,9 +116,8 @@ async function main() {
     const slice = data.slice(offset, offset + size);
     const value = decode(slice);
 
-    console.log(`Value ${index} @ offset ${offset} (bytes ${size}):`);
+    console.log(`@ ${offset} (${size} bytes, entry: ${index})`);
     console.log(formatValue(value));
-    console.log('');
 
     offset += size;
     index += 1;
