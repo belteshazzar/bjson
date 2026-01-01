@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import { RTree } from '../src/rtree.js';
-import { BJsonFile } from '../src/bjson.js';
+import { BJsonFile, ObjectId } from '../src/bjson.js';
 
 // Detect if running in browser
 const isBrowser = typeof navigator !== 'undefined' && typeof process === 'undefined';
@@ -56,6 +56,15 @@ function generateRandomLocation() {
   };
 }
 
+function generateLocationWithId(index) {
+  const location = generateRandomLocation();
+  return {
+    ...location,
+    objectId: new ObjectId(),
+    index
+  };
+}
+
 /**
  * Print timing report
  */
@@ -91,13 +100,10 @@ describe.skipIf(!hasOPFS)('R-tree Soak Tests', { timeout: 30000 }, () => {
     const insertStartTime = performance.now();
     
     for (let i = 0; i < count; i++) {
-      const location = generateRandomLocation();
+      const location = generateLocationWithId(i);
       
       const start = performance.now();
-      await tree.insert(location.lat, location.lng, { 
-        name: location.name,
-        index: i
-      });
+      await tree.insert(location.lat, location.lng, location.objectId);
       const elapsed = performance.now() - start;
       insertTimings.push(elapsed);
     }
@@ -125,13 +131,10 @@ describe.skipIf(!hasOPFS)('R-tree Soak Tests', { timeout: 30000 }, () => {
     const insertTimings = [];
     
     for (let i = 0; i < insertCount; i++) {
-      const location = generateRandomLocation();
+      const location = generateLocationWithId(i);
       
       const start = performance.now();
-      await tree.insert(location.lat, location.lng, { 
-        name: location.name,
-        index: i
-      });
+      await tree.insert(location.lat, location.lng, location.objectId);
       const elapsed = performance.now() - start;
       insertTimings.push(elapsed);
     }
@@ -187,13 +190,10 @@ describe.skipIf(!hasOPFS)('R-tree Soak Tests', { timeout: 30000 }, () => {
     const insertTimings = [];
     
     for (let i = 0; i < insertCount; i++) {
-      const location = generateRandomLocation();
+      const location = generateLocationWithId(i);
       
       const start = performance.now();
-      await tree.insert(location.lat, location.lng, { 
-        name: location.name,
-        index: i
-      });
+      await tree.insert(location.lat, location.lng, location.objectId);
       const elapsed = performance.now() - start;
       insertTimings.push(elapsed);
     }
@@ -245,13 +245,10 @@ describe.skipIf(!hasOPFS)('R-tree Soak Tests', { timeout: 30000 }, () => {
     const insertStartTime = performance.now();
     
     for (let i = 0; i < insertCount; i++) {
-      const location = generateRandomLocation();
+      const location = generateLocationWithId(i);
       
       const start = performance.now();
-      await tree.insert(location.lat, location.lng, { 
-        name: location.name,
-        index: i
-      });
+      await tree.insert(location.lat, location.lng, location.objectId);
       const elapsed = performance.now() - start;
       insertTimings.push(elapsed);
 
@@ -292,11 +289,8 @@ describe.skipIf(!hasOPFS)('R-tree Soak Tests', { timeout: 30000 }, () => {
     // Insert locations
     console.log(`\n  Setting up ${insertCount} locations...`);
     for (let i = 0; i < insertCount; i++) {
-      const location = generateRandomLocation();
-      await tree.insert(location.lat, location.lng, { 
-        name: location.name,
-        index: i
-      });
+      const location = generateLocationWithId(i);
+      await tree.insert(location.lat, location.lng, location.objectId);
     }
 
     // Warm up
@@ -364,11 +358,8 @@ describe.skipIf(!hasOPFS)('R-tree Soak Tests', { timeout: 30000 }, () => {
     console.log(`  Initial Heap: ${(startMemory.heapUsed / 1024 / 1024).toFixed(2)} MB`);
 
     for (let i = 0; i < insertCount; i++) {
-      const location = generateRandomLocation();
-      await tree.insert(location.lat, location.lng, { 
-        name: location.name,
-        index: i
-      });
+      const location = generateLocationWithId(i);
+      await tree.insert(location.lat, location.lng, location.objectId);
 
       if ((i + 1) % 2 === 0) {
         const currentMemory = process.memoryUsage();

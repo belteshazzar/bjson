@@ -14,7 +14,7 @@
  *   - For leaf nodes: children are data entries with {bbox, lat, lng, data}
  */
 
-import { BJsonFile, Pointer, encode, decode } from './bjson.js';
+import { BJsonFile, Pointer, ObjectId } from './bjson.js';
 
 /**
  * Calculate distance between two points using Haversine formula
@@ -637,7 +637,7 @@ export class RTree {
 		}
 
     if (!(objectId instanceof ObjectId)) {
-      throw new Error('objectId must be an instance of ObjectId to insert into rtree');
+      throw new Error('objectId must be an instance of ObjectId to remove from rtree');
     }
 
 		const root = await this._loadRoot();
