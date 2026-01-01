@@ -310,6 +310,10 @@ export class RTree {
 			throw new Error('R-tree file must be opened before use');
 		}
 
+    if (!(objectId instanceof ObjectId)) {
+      throw new Error('objectId must be an instance of ObjectId to insert into rtree');
+    }
+
 		const bbox = {
 			minLat: lat,
 			maxLat: lat,
@@ -631,6 +635,10 @@ export class RTree {
 		if (!this.isOpen) {
 			throw new Error('R-tree file must be opened before use');
 		}
+
+    if (!(objectId instanceof ObjectId)) {
+      throw new Error('objectId must be an instance of ObjectId to insert into rtree');
+    }
 
 		const root = await this._loadRoot();
 		const result = await this._remove(objectId, root);
