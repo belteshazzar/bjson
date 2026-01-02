@@ -91,7 +91,6 @@ export class BPlusTree {
      */
     async close() {
         if (this.isOpen) {
-            await this._saveMetadata();
             await this.file.close();
             this.isOpen = false;
         }
@@ -245,6 +244,7 @@ export class BPlusTree {
         this.rootPointer = rootPointer;
 
         this._size++;
+        await this._saveMetadata();
     }
 
     /**
@@ -360,6 +360,7 @@ export class BPlusTree {
         this.rootPointer = rootPointer;
 
         this._size--;
+        await this._saveMetadata();
     }
 
     /**
@@ -504,7 +505,6 @@ export class BPlusTree {
         }
 
         // Make sure the current file has up-to-date metadata before measuring size
-        await this._saveMetadata();
         const oldSize = await this.file.getFileSize();
 
         // Rebuild a fresh tree with only the live entries
