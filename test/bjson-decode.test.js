@@ -64,7 +64,7 @@ describe('bjson-decode CLI', () => {
     expect(stdout).toContain('Date(2020-01-02T03:04:05.000Z)');
     expect(stdout).toContain('Date(2021-01-01T00:00:00.000Z)');
     // Ensure nested structures are rendered across lines
-    expect(stdout).toContain('Value 0 @ offset 0');
-    expect(stdout).toMatch(/Value 1 @ offset \d+/);
+    expect(stdout).toContain('@ 0 (64 bytes, entry: 0)');
+    expect(stdout).toMatch(/@ 64 \(40 bytes, entry: 1\)/);
   });
 });
