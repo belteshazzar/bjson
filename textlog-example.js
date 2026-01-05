@@ -7,7 +7,7 @@
  * - Generate human-readable diffs between versions
  */
 
-import { TextLog } from '../src/textlog.js';
+import { TextLog } from './src/textlog.js';
 
 // Set up node-opfs for Node.js environment
 async function setupOPFS() {
