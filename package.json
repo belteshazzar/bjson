@@ -8,7 +8,8 @@
     ".": "./src/bjson.js",
     "./bplustree": "./src/bplustree.js",
     "./rtree": "./src/rtree.js",
-    "./textindex": "./src/textindex.js"
+    "./textindex": "./src/textindex.js",
+    "./textlog": "./src/textlog.js"
   },
   "bin": {
     "bjson-decode": "./bin/bjson-decode.js"
@@ -45,6 +46,7 @@
     "vitest": "^3.2.4"
   },
   "dependencies": {
+    "diff": "^8.0.2",
     "stemmer": "^2.0.1"
   }
 }
