@@ -320,9 +320,41 @@ export class TextLog {
       return entry.data;
     }
     
-    // If it's a diff, we need to reconstruct from snapshot
-    // This is inefficient, but we need the snapshot
-    return await this.getVersion(entry.version);
+    // If it's a diff, reconstruct from the latest snapshot
+    // We need to scan backwards to find the snapshot and apply all diffs
+    let snapshotEntry = null;
+    const diffsToApply = [];
+    
+    for await (const e of this.file.scan()) {
+      if (!e.type || (e.type !== ENTRY_TYPE.FULL_SNAPSHOT && e.type !== ENTRY_TYPE.DIFF)) {
+        continue;
+      }
+      
+      if (e.version <= entry.version) {
+        if (e.type === ENTRY_TYPE.FULL_SNAPSHOT) {
+          snapshotEntry = e;
+          // Clear any diffs before this snapshot
+          diffsToApply.length = 0;
+        } else if (e.version > (snapshotEntry ? snapshotEntry.version : 0)) {
+          diffsToApply.push(e);
+        }
+      }
+      
+      if (e.version > entry.version) {
+        break;
+      }
+    }
+    
+    if (!snapshotEntry) {
+      throw new Error(`Cannot reconstruct: no snapshot found`);
+    }
+    
+    let text = snapshotEntry.data;
+    for (const diffEntry of diffsToApply) {
+      text = applyPatch(text, diffEntry.data);
+    }
+    
+    return text;
   }
   
   /**
