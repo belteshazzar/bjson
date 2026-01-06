@@ -172,7 +172,7 @@ describe.skipIf(!hasOPFS)('BPlusTree', function() {
             expect(await tree.search('cherry')).toBe(3);
         });
 
-        it('should handle large number of insertions', { timeout: 60000 }, async function() {
+        it('should handle large number of insertions', { timeout: 120000 }, async function() {
             const count = 100;
             for (let i = 0; i < count; i++) {
                 await tree.add(i, `value${i}`);

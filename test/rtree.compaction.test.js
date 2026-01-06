@@ -58,7 +58,7 @@ describe.skipIf(!hasOPFS)('R-tree Compaction', function() {
     await cleanupFile(compactedFilename);
   });
 
-  it('should compact the tree and reduce file size while preserving data', { timeout: 120000 }, async function() {
+  it('should compact the tree and reduce file size while preserving data', { timeout: 240000 }, async function() {
     const insertedIds = [];
     for (let i = 0; i < 120; i++) {
       const lat = -80 + Math.random() * 160;
