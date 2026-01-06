@@ -164,6 +164,14 @@ class ObjectId {
  */
 class Timestamp {
   constructor(seconds = 0, increment = 0) {
+
+    // If called with no args, capture current time
+    if (arguments.length === 0) {
+      const now = Date.now();
+      seconds = Math.floor(now / 1000);
+      increment = now % 1000; // milliseconds within the current second
+    }
+    
     if (seconds instanceof Timestamp) {
       this.seconds = seconds.seconds;
       this.increment = seconds.increment;

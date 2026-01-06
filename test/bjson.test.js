@@ -194,6 +194,22 @@ describe('Binary JSON Encoder/Decoder', () => {
       expect(() => new Timestamp(0x1_0000_0000, 0)).toThrow();
       expect(() => new Timestamp(0, 0x1_0000_0000)).toThrow();
     });
+
+    it('should default to current time with millisecond increment', () => {
+      const before = Date.now();
+      const ts = new Timestamp();
+      const after = Date.now();
+
+      // seconds should be within the captured window (allow 1s skew)
+      const minSec = Math.floor(before / 1000) - 1;
+      const maxSec = Math.floor(after / 1000) + 1;
+      expect(ts.seconds).toBeGreaterThanOrEqual(minSec);
+      expect(ts.seconds).toBeLessThanOrEqual(maxSec);
+
+      // increment should be millisecond offset within the second
+      expect(ts.increment).toBeGreaterThanOrEqual(0);
+      expect(ts.increment).toBeLessThan(1000);
+    });
   });
 
   describe('DATE', () => {
