@@ -176,8 +176,8 @@ describe('Binary JSON Encoder/Decoder', () => {
       const ts = new Timestamp(1700000000, 1234);
       const decoded = decode(encode(ts));
       expect(decoded).toBeInstanceOf(Timestamp);
-      expect(decoded.seconds).toBe(1700000000);
-      expect(decoded.increment).toBe(1234);
+      expect(decoded.t).toBe(1700000000);
+      expect(decoded.i).toBe(1234);
     });
 
     it('should convert to and from bigint', () => {
@@ -203,12 +203,12 @@ describe('Binary JSON Encoder/Decoder', () => {
       // seconds should be within the captured window (allow 1s skew)
       const minSec = Math.floor(before / 1000) - 1;
       const maxSec = Math.floor(after / 1000) + 1;
-      expect(ts.seconds).toBeGreaterThanOrEqual(minSec);
-      expect(ts.seconds).toBeLessThanOrEqual(maxSec);
+      expect(ts.t).toBeGreaterThanOrEqual(minSec);
+      expect(ts.t).toBeLessThanOrEqual(maxSec);
 
       // increment should be millisecond offset within the second
-      expect(ts.increment).toBeGreaterThanOrEqual(0);
-      expect(ts.increment).toBeLessThan(1000);
+      expect(ts.i).toBeGreaterThanOrEqual(0);
+      expect(ts.i).toBeLessThan(1000);
     });
   });
 

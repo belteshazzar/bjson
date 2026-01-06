@@ -173,8 +173,8 @@ class Timestamp {
     }
     
     if (seconds instanceof Timestamp) {
-      this.seconds = seconds.seconds;
-      this.increment = seconds.increment;
+      this.t = seconds.seconds;
+      this.i = seconds.increment;
       return;
     }
 
@@ -185,12 +185,12 @@ class Timestamp {
       throw new Error('Timestamp increment must be a uint32');
     }
 
-    this.seconds = seconds >>> 0;
-    this.increment = increment >>> 0;
+    this.t = seconds >>> 0;
+    this.i = increment >>> 0;
   }
 
   toBigInt() {
-    return (BigInt(this.seconds) << 32n) | BigInt(this.increment);
+    return (BigInt(this.t) << 32n) | BigInt(this.i);
   }
 
   toBytes() {
@@ -204,15 +204,15 @@ class Timestamp {
     if (!(other instanceof Timestamp)) {
       return false;
     }
-    return this.seconds === other.seconds && this.increment === other.increment;
+    return this.t === other.t && this.i === other.i;
   }
 
   toJSON() {
-    return { t: this.seconds, i: this.increment };
+    return { t: this.t, i: this.i };
   }
 
   toString() {
-    return `Timestamp({ t: ${this.seconds}, i: ${this.increment} })`;
+    return `Timestamp({ t: ${this.t}, i: ${this.i} })`;
   }
 
   static fromBigInt(value) {
