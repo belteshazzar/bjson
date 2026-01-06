@@ -15,6 +15,7 @@ const TYPE = {
   OID: 0x06,
   DATE: 0x07,
   POINTER: 0x08,
+  BINARY: 0x09,
   ARRAY: 0x10,
   OBJECT: 0x11
 };
@@ -246,6 +247,14 @@ function encode(value) {
       const view = new DataView(buffer);
       view.setBigUint64(0, BigInt(val.offset), true); // little-endian
       buffers.push(new Uint8Array(buffer));
+    } else if (val instanceof Uint8Array) {
+      buffers.push(new Uint8Array([TYPE.BINARY]));
+      // Store length as 32-bit integer
+      const lengthBuffer = new ArrayBuffer(4);
+      const lengthView = new DataView(lengthBuffer);
+      lengthView.setUint32(0, val.length, true);
+      buffers.push(new Uint8Array(lengthBuffer));
+      buffers.push(val);
     } else if (typeof val === 'number') {
       if (Number.isInteger(val) && Number.isSafeInteger(val)) {
         // 64-bit signed integer (stored as BigInt64)
@@ -450,6 +459,22 @@ function decode(data) {
           throw new Error('Pointer offset out of valid range');
         }
         return new Pointer(Number(pointerOffset));
+      }
+      
+      case TYPE.BINARY: {
+        if (offset + 4 > data.length) {
+          throw new Error('Unexpected end of data for BINARY length');
+        }
+        const lengthView = new DataView(data.buffer, data.byteOffset + offset, 4);
+        const length = lengthView.getUint32(0, true);
+        offset += 4;
+        
+        if (offset + length > data.length) {
+          throw new Error('Unexpected end of data for BINARY content');
+        }
+        const binaryData = data.slice(offset, offset + length);
+        offset += length;
+        return binaryData;
       }
       
       case TYPE.ARRAY: {
@@ -725,6 +750,14 @@ class BJsonFile {
               return 1 + 12;
             
             case TYPE.STRING: {
+              // Read length (4 bytes)
+              tempData = await this.#readRange(readPosition + 1, 4);
+              const view = new DataView(tempData.buffer, tempData.byteOffset, 4);
+              const length = view.getUint32(0, true);
+              return 1 + 4 + length;
+            }
+            
+            case TYPE.BINARY: {
               // Read length (4 bytes)
               tempData = await this.#readRange(readPosition + 1, 4);
               const view = new DataView(tempData.buffer, tempData.byteOffset, 4);

@@ -28,6 +28,7 @@ The library uses the following byte values for encoding JSON types:
 | OID     | 0x06      | 12 bytes (MongoDB ObjectId)                         |
 | DATE    | 0x07      | 8 bytes (64-bit signed integer milliseconds, little-endian) |
 | POINTER | 0x08      | 8 bytes (64-bit non-negative integer file offset, little-endian) |
+| BINARY  | 0x09      | 4-byte length + raw binary bytes                    |
 | ARRAY   | 0x10      | 4-byte length + encoded elements                    |
 | OBJECT  | 0x11      | 4-byte count + key-value pairs                      |
 
@@ -94,6 +95,31 @@ const decoded = decode(binary);
 
 console.log(decoded.timestamp); // Date object: 2023-01-15T12:30:45.000Z
 console.log(decoded.message); // 'Hello'
+```
+
+### Using Binary Data (Uint8Array)
+
+```javascript
+const { encode, decode } = require('./bjson.js');
+
+// Encode binary data
+const binaryData = new Uint8Array([0xDE, 0xAD, 0xBE, 0xEF]);
+const encoded = encode(binaryData);
+const decoded = decode(encoded);
+
+console.log(decoded); // Uint8Array [0xDE, 0xAD, 0xBE, 0xEF]
+
+// Binary data in objects
+const data = {
+  name: 'image.png',
+  content: new Uint8Array([0x89, 0x50, 0x4E, 0x47]), // PNG header
+  size: 4
+};
+
+const binaryEncoded = encode(data);
+const binaryDecoded = decode(binaryEncoded);
+
+console.log(binaryDecoded.content); // Uint8Array [0x89, 0x50, 0x4E, 0x47]
 ```
 
 ### Using Pointer for File Offsets

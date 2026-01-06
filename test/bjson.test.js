@@ -250,6 +250,77 @@ describe('Binary JSON Encoder/Decoder', () => {
     });
   });
 
+  describe('BINARY', () => {
+    it('should have correct type byte', () => {
+      const binary = new Uint8Array([1, 2, 3, 4, 5]);
+      const encoded = encode(binary);
+      expect(encoded[0]).toBe(TYPE.BINARY);
+    });
+
+    it('should encode to correct size', () => {
+      const binary = new Uint8Array([1, 2, 3, 4, 5]);
+      const encoded = encode(binary);
+      // 1 byte type + 4 bytes length + 5 bytes data = 10 bytes
+      expect(encoded).toHaveLength(10);
+    });
+
+    it('should round-trip simple binary data', () => {
+      const binary = new Uint8Array([1, 2, 3, 4, 5]);
+      const decoded = decode(encode(binary));
+      expect(decoded).toBeInstanceOf(Uint8Array);
+      expect(decoded).toEqual(binary);
+    });
+
+    it('should round-trip empty binary data', () => {
+      const binary = new Uint8Array([]);
+      const decoded = decode(encode(binary));
+      expect(decoded).toBeInstanceOf(Uint8Array);
+      expect(decoded).toEqual(binary);
+      expect(decoded).toHaveLength(0);
+    });
+
+    it('should round-trip binary data with all byte values', () => {
+      const binary = new Uint8Array(256);
+      for (let i = 0; i < 256; i++) {
+        binary[i] = i;
+      }
+      const decoded = decode(encode(binary));
+      expect(decoded).toEqual(binary);
+    });
+
+    it('should round-trip large binary data', () => {
+      const size = 10000;
+      const binary = new Uint8Array(size);
+      for (let i = 0; i < size; i++) {
+        binary[i] = i % 256;
+      }
+      const decoded = decode(encode(binary));
+      expect(decoded).toEqual(binary);
+    });
+
+    it('should handle binary data in object', () => {
+      const data = {
+        name: 'test',
+        buffer: new Uint8Array([0xDE, 0xAD, 0xBE, 0xEF])
+      };
+      const decoded = decode(encode(data));
+      expect(decoded.name).toBe('test');
+      expect(decoded.buffer).toBeInstanceOf(Uint8Array);
+      expect(decoded.buffer).toEqual(new Uint8Array([0xDE, 0xAD, 0xBE, 0xEF]));
+    });
+
+    it('should handle binary data in array', () => {
+      const binary1 = new Uint8Array([1, 2, 3]);
+      const binary2 = new Uint8Array([4, 5, 6]);
+      const arr = [binary1, 'text', binary2];
+      const decoded = decode(encode(arr));
+      expect(decoded).toHaveLength(3);
+      expect(decoded[0]).toEqual(binary1);
+      expect(decoded[1]).toBe('text');
+      expect(decoded[2]).toEqual(binary2);
+    });
+  });
+
   describe('ARRAY', () => {
     it('should have correct type byte', () => {
       const encoded = encode([1, 2, 3]);
