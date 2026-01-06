@@ -16,6 +16,7 @@ const TYPE = {
   DATE: 0x07,
   POINTER: 0x08,
   BINARY: 0x09,
+  TIMESTAMP: 0x0A,
   ARRAY: 0x10,
   OBJECT: 0x11
 };
@@ -157,6 +158,69 @@ class ObjectId {
 }
 
 /**
+ * Timestamp class - MongoDB-compatible BSON Timestamp
+ * Represents a 64-bit value where the high 32 bits are seconds since epoch
+ * and the low 32 bits are an incrementing ordinal.
+ */
+class Timestamp {
+  constructor(seconds = 0, increment = 0) {
+    if (seconds instanceof Timestamp) {
+      this.seconds = seconds.seconds;
+      this.increment = seconds.increment;
+      return;
+    }
+
+    if (!Number.isInteger(seconds) || seconds < 0 || seconds > 0xFFFFFFFF) {
+      throw new Error('Timestamp seconds must be a uint32');
+    }
+    if (!Number.isInteger(increment) || increment < 0 || increment > 0xFFFFFFFF) {
+      throw new Error('Timestamp increment must be a uint32');
+    }
+
+    this.seconds = seconds >>> 0;
+    this.increment = increment >>> 0;
+  }
+
+  toBigInt() {
+    return (BigInt(this.seconds) << 32n) | BigInt(this.increment);
+  }
+
+  toBytes() {
+    const buffer = new ArrayBuffer(8);
+    const view = new DataView(buffer);
+    view.setBigUint64(0, this.toBigInt(), true);
+    return new Uint8Array(buffer);
+  }
+
+  equals(other) {
+    if (!(other instanceof Timestamp)) {
+      return false;
+    }
+    return this.seconds === other.seconds && this.increment === other.increment;
+  }
+
+  toJSON() {
+    return { t: this.seconds, i: this.increment };
+  }
+
+  toString() {
+    return `Timestamp({ t: ${this.seconds}, i: ${this.increment} })`;
+  }
+
+  static fromBigInt(value) {
+    if (typeof value !== 'bigint') {
+      throw new Error('Timestamp.fromBigInt requires a bigint');
+    }
+    if (value < 0n || value > 0xFFFFFFFFFFFFFFFFn) {
+      throw new Error('Timestamp value out of range');
+    }
+    const seconds = Number((value >> 32n) & 0xFFFFFFFFn);
+    const increment = Number(value & 0xFFFFFFFFn);
+    return new Timestamp(seconds, increment);
+  }
+}
+
+/**
  * Pointer class - represents a 64-bit file offset pointer
  * Used to store file offsets for referenced data structures
  */
@@ -234,6 +298,9 @@ function encode(value) {
       buffers.push(new Uint8Array([TYPE.TRUE]));
     } else if (val instanceof ObjectId) {
       buffers.push(new Uint8Array([TYPE.OID]));
+      buffers.push(val.toBytes());
+    } else if (val instanceof Timestamp) {
+      buffers.push(new Uint8Array([TYPE.TIMESTAMP]));
       buffers.push(val.toBytes());
     } else if (val instanceof Date) {
       buffers.push(new Uint8Array([TYPE.DATE]));
@@ -435,6 +502,16 @@ function decode(data) {
         const oidBytes = data.slice(offset, offset + 12);
         offset += 12;
         return new ObjectId(oidBytes);
+      }
+
+      case TYPE.TIMESTAMP: {
+        if (offset + 8 > data.length) {
+          throw new Error('Unexpected end of data for TIMESTAMP');
+        }
+        const view = new DataView(data.buffer, data.byteOffset + offset, 8);
+        const tsValue = view.getBigUint64(0, true);
+        offset += 8;
+        return Timestamp.fromBigInt(tsValue);
       }
       
       case TYPE.DATE: {
@@ -743,6 +820,7 @@ class BJsonFile {
             case TYPE.INT:
             case TYPE.FLOAT:
             case TYPE.DATE:
+            case TYPE.TIMESTAMP:
             case TYPE.POINTER:
               return 1 + 8;
 
@@ -835,6 +913,7 @@ class BJsonFile {
 export {
   TYPE,
   ObjectId,
+  Timestamp,
   Pointer,
   encode,
   decode,
