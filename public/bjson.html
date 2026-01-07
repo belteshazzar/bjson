@@ -107,13 +107,18 @@
   
   <div class="container">
     <div class="info">
-      <strong>Note:</strong> This demo requires a browser that supports Origin Private File System (OPFS).
+      <strong>Note:</strong> BJsonFile now uses FileSystemSyncAccessHandle which requires Web Worker context.<br>
+      The encoding/decoding features below work in the main thread, but file operations must be performed in a Web Worker.<br>
       Supported browsers include Chrome 102+, Edge 102+, and Opera 88+.
+    </div>
+    <div class="error" id="workerWarning" style="display: none;">
+      <strong>Warning:</strong> File operations will fail because FileSystemSyncAccessHandle is only available in Web Workers. 
+      Please see the BJsonFile documentation for examples of using it in a Web Worker context.
     </div>
   </div>
 
   <div class="container">
-    <h2>File Operations</h2>
+    <h2>File Operations (Requires Web Worker)</h2>
     
     <div>
       <label for="filename">Filename:</label>
@@ -312,6 +317,9 @@ OBJECT:  0x11 (num keys as 32-bit uint + key-value pairs)
     }
 
     async function writeFile() {
+      // Show warning about web worker requirement
+      document.getElementById('workerWarning').style.display = 'block';
+      
       try {
         const jsonInput = document.getElementById('jsonInput').value;
         const data = parseExtendedJSON(jsonInput);
@@ -324,7 +332,11 @@ OBJECT:  0x11 (num keys as 32-bit uint + key-value pairs)
         showMessage('message', `Successfully wrote data to ${getFilename()}`);
         document.getElementById('output').textContent = 'Data written to file successfully!';
       } catch (error) {
-        showMessage('message', `Error: ${error.message}`, 'error');
+        if (error.message.includes('Web Worker')) {
+          showMessage('message', `File operations require Web Worker context. ${error.message}`, 'error');
+        } else {
+          showMessage('message', `Error: ${error.message}`, 'error');
+        }
         console.error(error);
       }
     }
@@ -332,6 +344,9 @@ OBJECT:  0x11 (num keys as 32-bit uint + key-value pairs)
     document.getElementById('writeFileBtn').addEventListener('click', writeFile);
 
     async function readFile() {
+      // Show warning about web worker requirement
+      document.getElementById('workerWarning').style.display = 'block';
+      
       try {
         const file = new BJsonFile(getFilename());
         await file.open('r');
@@ -341,7 +356,11 @@ OBJECT:  0x11 (num keys as 32-bit uint + key-value pairs)
         showMessage('message', `Successfully read data from ${getFilename()}`);
         document.getElementById('output').textContent = formatOutput(data);
       } catch (error) {
-        showMessage('message', `Error: ${error.message}`, 'error');
+        if (error.message.includes('Web Worker')) {
+          showMessage('message', `File operations require Web Worker context. ${error.message}`, 'error');
+        } else {
+          showMessage('message', `Error: ${error.message}`, 'error');
+        }
         console.error(error);
       }
     }

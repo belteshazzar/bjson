@@ -637,20 +637,24 @@ function decode(data) {
 }
 
 /**
- * OPFS File Operations
+ * OPFS File Operations using FileSystemSyncAccessHandle
+ * 
+ * IMPORTANT: This class uses FileSystemSyncAccessHandle which is only available
+ * in Web Workers. It provides synchronous file operations with explicit flush control.
  */
 class BJsonFile {
   constructor(filename) {
     this.filename = filename;
     this.root = null;
     this.fileHandle = null;
-    this.file = null;
+    this.syncAccessHandle = null;
     this.mode = null; // 'r' for read-only, 'rw' for read-write
     this.isOpen = false;
   }
 
   /**
    * Open the file with specified mode
+   * Note: This must be called from a Web Worker as it uses FileSystemSyncAccessHandle
    * @param {string} mode - 'r' for read-only, 'rw' for read-write
    */
   async open(mode = 'r') {
@@ -677,24 +681,44 @@ class BJsonFile {
         // For read-write mode, create if doesn't exist
         this.fileHandle = await this.root.getFileHandle(this.filename, { create: true });
       }
-      this.file = await this.fileHandle.getFile();
+      
+      // Create sync access handle - only works in Web Workers
+      this.syncAccessHandle = await this.fileHandle.createSyncAccessHandle();
       this.isOpen = true;
     } catch (error) {
       if (error.name === 'NotFoundError') {
         throw new Error(`File not found: ${this.filename}`);
+      }
+      if (error.name === 'NoModificationAllowedError' || error.message?.includes('createSyncAccessHandle')) {
+        throw new Error('FileSystemSyncAccessHandle is only available in Web Workers. BJsonFile must be used in a Web Worker context.');
       }
       throw error;
     }
   }
 
   /**
-   * Close the file
+   * Close the file and flush any pending writes
    */
   async close() {
+    if (this.syncAccessHandle) {
+      // Flush any pending writes before closing
+      // Note: In the node-opfs polyfill (used for testing), these operations return Promises,
+      // but in real browsers they're synchronous
+      const flushResult = this.syncAccessHandle.flush();
+      if (flushResult instanceof Promise) {
+        await flushResult;
+      }
+      
+      const closeResult = this.syncAccessHandle.close();
+      if (closeResult instanceof Promise) {
+        await closeResult;
+      }
+      
+      this.syncAccessHandle = null;
+    }
     this.isOpen = false;
     this.mode = null;
     this.fileHandle = null;
-    this.file = null;
   }
 
   /**
@@ -717,42 +741,64 @@ class BJsonFile {
   }
 
   /**
-   * Refresh the file reference (needed after writes to get updated size)
+   * Read a range of bytes from the file
    */
-  async refreshFile() {
-    this.ensureOpen();
-    this.file = await this.fileHandle.getFile();
-  }
-
   async #readRange(start, length) {
     this.ensureOpen();
-    const slice = this.file.slice(start, start + length);
-    const arrayBuffer = await slice.arrayBuffer();
-    return new Uint8Array(arrayBuffer);
+    const buffer = new Uint8Array(length);
+    const bytesRead = this.syncAccessHandle.read(buffer, { at: start });
+    if (bytesRead < length) {
+      // Return only the bytes that were actually read
+      return buffer.slice(0, bytesRead);
+    }
+    return buffer;
   }
 
+  /**
+   * Get the current file size
+   * Note: In the node-opfs polyfill (used for testing), getSize returns a Promise,
+   * but in real browsers it's synchronous
+   */
   async getFileSize() {
     this.ensureOpen();
-    return this.file.size;
+    const size = this.syncAccessHandle.getSize();
+    // Handle both sync (real browser) and async (node-opfs polyfill) cases
+    return size instanceof Promise ? await size : size;
   }
 
+  /**
+   * Write data to file, truncating existing content
+   * Uses synchronous operations internally but returns a Promise for API compatibility
+   * Changes are automatically flushed to disk
+   * @param {*} data - Data to encode and write
+   */
   async write(data) {
     this.ensureWritable();
     
     // Encode data to binary
     const binaryData = encode(data);
     
-    // Create writable stream (truncates existing content)
-    const writable = await this.fileHandle.createWritable();
+    // Truncate file to 0 bytes (clear existing content)
+    this.syncAccessHandle.truncate(0);
     
-    // Write data
-    await writable.write(binaryData);
-    await writable.close();
+    // Write data at beginning of file
+    this.syncAccessHandle.write(binaryData, { at: 0 });
     
-    // Refresh file reference to get updated size
-    await this.refreshFile();
+    // Flush changes to disk
+    // Note: In the node-opfs polyfill (used for testing), flush returns a Promise,
+    // but in real browsers it's synchronous
+    const flushResult = this.syncAccessHandle.flush();
+    if (flushResult instanceof Promise) {
+      await flushResult;
+    }
   }
 
+  /**
+   * Read and decode data from file starting at optional pointer offset
+   * Uses synchronous operations internally but returns a Promise for API compatibility
+   * @param {Pointer} pointer - Optional offset to start reading from (default: 0)
+   * @returns {*} - Decoded data
+   */
   async read(pointer = new Pointer(0)) {
     this.ensureOpen();
     
@@ -776,6 +822,12 @@ class BJsonFile {
     return decode(binaryData);
   }
 
+  /**
+   * Append data to file without truncating existing content
+   * Uses synchronous operations internally but returns a Promise for API compatibility
+   * Changes are automatically flushed to disk
+   * @param {*} data - Data to encode and append
+   */
   async append(data) {
     this.ensureWritable();
     
@@ -783,22 +835,36 @@ class BJsonFile {
     const binaryData = encode(data);
     
     // Get current file size
-    const existingSize = this.file.size;
+    const existingSize = await this.getFileSize();
     
-    // Create writable stream with keepExistingData
-    const writable = await this.fileHandle.createWritable({ keepExistingData: true });
+    // Write new data at end of file
+    this.syncAccessHandle.write(binaryData, { at: existingSize });
     
-    // Seek to end
-    await writable.seek(existingSize);
-    
-    // Write new data
-    await writable.write(binaryData);
-    await writable.close();
-    
-    // Refresh file reference to get updated size
-    await this.refreshFile();
+    // Flush changes to disk
+    // Note: In the node-opfs polyfill (used for testing), flush returns a Promise,
+    // but in real browsers it's synchronous
+    const flushResult = this.syncAccessHandle.flush();
+    if (flushResult instanceof Promise) {
+      await flushResult;
+    }
   }
 
+  /**
+   * Explicitly flush any pending writes to disk
+   * Uses synchronous operations internally but returns a Promise for API compatibility
+   */
+  async flush() {
+    this.ensureWritable();
+    const flushResult = this.syncAccessHandle.flush();
+    if (flushResult instanceof Promise) {
+      await flushResult;
+    }
+  }
+
+  /**
+   * Async generator to scan through all records in the file
+   * Each record is decoded and yielded one at a time
+   */
   async *scan() {
     this.ensureOpen();
     

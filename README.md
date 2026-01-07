@@ -140,24 +140,30 @@ console.log(decoded.dataOffset.valueOf()); // 2048
 // Use the pointer to seek to that position in a file and read data
 ```
 
-### OPFS File Operations (Browser Only)
+### OPFS File Operations (Web Worker Only)
 
-**Important**: Files must be explicitly opened before use and closed when done. Files can be opened in two modes:
-- `'r'` - Read-only mode (file must exist)
-- `'rw'` - Read-write mode (file created if it doesn't exist)
+**Important**: 
+- `BJsonFile` uses `FileSystemSyncAccessHandle` which is **only available in Web Workers**
+- Files must be explicitly opened before use and closed when done
+- A single file handle is used for all read/write operations, improving performance
+- Changes are automatically flushed to disk after each write/append operation
+- Files can be opened in two modes:
+  - `'r'` - Read-only mode (file must exist)
+  - `'rw'` - Read-write mode (file created if it doesn't exist)
 
 See [FILE-MODE-API.md](FILE-MODE-API.md) for detailed documentation.
 
 #### Write to File
 
 ```javascript
-const { BJsonFile } = window.BJson;
+// In a Web Worker:
+const { BJsonFile } = self.BJson;
 
 const file = new BJsonFile('data.bjson');
 await file.open('rw');  // Open in read-write mode
 
 const data = { name: 'John', age: 30 };
-await file.write(data);
+await file.write(data);  // Automatically flushed to disk
 
 await file.close();
 ```
@@ -165,6 +171,7 @@ await file.close();
 #### Read from File
 
 ```javascript
+// In a Web Worker:
 const file = new BJsonFile('data.bjson');
 await file.open('r');  // Open in read-only mode
 
@@ -177,13 +184,14 @@ await file.close();
 #### Append to File
 
 ```javascript
+// In a Web Worker:
 const file = new BJsonFile('data.bjson');
 await file.open('rw');  // Open in read-write mode
 
 // Write initial record
 await file.write({ id: 1, name: 'Record 1' });
 
-// Append more records (same file handle)
+// Append more records (same file handle - efficient!)
 await file.append({ id: 2, name: 'Record 2' });
 await file.append({ id: 3, name: 'Record 3' });
 
@@ -193,6 +201,7 @@ await file.close();
 #### Scan File (Read All Records)
 
 ```javascript
+// In a Web Worker:
 const file = new BJsonFile('data.bjson');
 await file.open('r');  // Open in read-only mode
 
@@ -210,6 +219,7 @@ await file.close();
 #### Other File Operations
 
 ```javascript
+// In a Web Worker:
 const file = new BJsonFile('data.bjson');
 
 // Check if file exists (doesn't require opening)
@@ -219,17 +229,25 @@ console.log(exists); // true or false
 // Delete file (requires read-write mode)
 await file.open('rw');
 await file.delete();  // Automatically closes after deletion
+
+// Explicit flush (write/append already auto-flush)
+await file.open('rw');
+await file.write({ data: 'example' });
+// ... more operations ...
+await file.flush();  // Ensure all writes are persisted
+await file.close();
 ```
 
 #### Reusing File Handles
 
-One file handle can be used for multiple operations, improving efficiency:
+A single `FileSystemSyncAccessHandle` is used for all operations once opened, making multiple operations very efficient:
 
 ```javascript
+// In a Web Worker:
 const file = new BJsonFile('data.bjson');
-await file.open('rw');
+await file.open('rw');  // Opens once with a single sync access handle
 
-// Multiple operations on the same handle
+// Multiple operations on the same handle - no need to reopen!
 await file.write({ id: 1 });
 await file.append({ id: 2 });
 await file.append({ id: 3 });
@@ -242,19 +260,20 @@ for await (const record of file.scan()) {
   console.log(record);
 }
 
-await file.close();
+await file.close();  // Flushes and closes the single handle
 ```
 
 ## Browser Support
 
-The OPFS functionality requires browsers that support the Origin Private File System API:
+The OPFS functionality with `FileSystemSyncAccessHandle` requires:
 
+- **Web Worker context** (not available on main thread)
 - Chrome 102+
 - Edge 102+
 - Opera 88+
 - Other Chromium-based browsers
 
-For other browsers, the encoding and decoding functions work normally, but file operations are not available.
+For other browsers or main thread usage, the encoding and decoding functions work normally, but file operations are not available.
 
 ## Demo
 
@@ -317,9 +336,15 @@ new Pointer(offset)
 
 ### `BJsonFile`
 
-Class for OPFS file operations (browser only).
+Class for OPFS file operations using `FileSystemSyncAccessHandle`.
 
-**Important**: Files must be opened before use and closed when done. See [FILE-MODE-API.md](FILE-MODE-API.md) for detailed documentation.
+**Important**: 
+- Must be used in a **Web Worker context** only
+- Uses a single persistent file handle for all operations
+- Files must be opened before use and closed when done
+- All write/append operations automatically flush to disk
+
+See [FILE-MODE-API.md](FILE-MODE-API.md) for detailed documentation.
 
 #### Constructor
 
@@ -331,13 +356,16 @@ new BJsonFile(filename)
 
 #### Methods
 
-- `async open(mode)` - Open file in specified mode
+- `async open(mode)` - Open file in specified mode and create sync access handle
   - `mode` - `'r'` for read-only (file must exist) or `'rw'` for read-write (creates if needed)
-  - Throws error if file already open or if file not found in read mode
-- `async close()` - Close the file and release handle
-- `async write(data)` - Write data to file (overwrites existing, requires 'rw' mode)
-- `async read()` - Read and decode data from file (requires file to be open)
-- `async append(data)` - Append data to existing file (requires 'rw' mode)
+  - Throws error if file already open, if file not found in read mode, or if not in a Web Worker
+  - Creates a single `FileSystemSyncAccessHandle` for all subsequent operations
+- `async close()` - Flush pending writes, close the sync access handle, and release resources
+- `async write(data)` - Write data to file (overwrites existing, requires 'rw' mode, auto-flushes)
+- `async read(pointer)` - Read and decode data from file (requires file to be open)
+  - `pointer` - Optional Pointer offset to start reading from (default: 0)
+- `async append(data)` - Append data to existing file (requires 'rw' mode, auto-flushes)
+- `async flush()` - Explicitly flush any pending writes to disk (write/append already auto-flush)
 - `async *scan()` - Async generator to scan through all records (requires file to be open)
 - `async delete()` - Delete the file (requires 'rw' mode, auto-closes after)
 - `async exists()` - Check if file exists (can be called without opening)
