@@ -393,7 +393,7 @@ OBJECT:  0x11 (num keys as 32-bit uint + key-value pairs)
         await file.open('r');
         const records = [];
         
-        for await (const record of file.scan()) {
+        for (const record of file.scan()) {
           records.push(record);
         }
         

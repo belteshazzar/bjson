@@ -436,15 +436,10 @@ describe.skipIf(!hasOPFS)('BJsonFile', () => {
   afterEach(async () => {
     // Clean up test files
     for (const filename of testFiles) {
-      try {
         const file = new BJsonFile(filename);
         if (await file.exists()) {
-          await file.open('rw');
           await file.delete();
         }
-      } catch (e) {
-        // Ignore cleanup errors
-      }
     }
   });
 
@@ -464,11 +459,11 @@ describe.skipIf(!hasOPFS)('BJsonFile', () => {
       }
     };
 
-    await file.write(data);
+    file.write(data);
     await file.close();
 
     await file.open('r');
-    const readData = await file.read();
+    const readData = file.read();
     await file.close();
 
     expect(readData.name).toBe('Test Document');
@@ -482,7 +477,7 @@ describe.skipIf(!hasOPFS)('BJsonFile', () => {
   it('should check file existence', async () => {
     const file = new BJsonFile('test-bjsonfile.bjson');
     await file.open('rw');
-    await file.write({ test: 'data' });
+    file.write({ test: 'data' });
     await file.close();
 
     expect(await file.exists()).toBe(true);
@@ -496,18 +491,18 @@ describe.skipIf(!hasOPFS)('BJsonFile', () => {
     
     // Write first record
     await file.open('rw');
-    await file.write({ id: 1, name: 'First' });
+    file.write({ id: 1, name: 'First' });
     await file.close();
 
     // Append second record
     await file.open('rw');
-    await file.append({ id: 2, name: 'Second' });
+    file.append({ id: 2, name: 'Second' });
     await file.close();
 
     // Scan records
     await file.open('r');
     const records = [];
-    for await (const record of file.scan()) {
+    for (const record of file.scan()) {
       records.push(record);
     }
     await file.close();
@@ -520,7 +515,7 @@ describe.skipIf(!hasOPFS)('BJsonFile', () => {
   it('should enforce read-only mode', async () => {
     const file = new BJsonFile('test-bjsonfile.bjson');
     await file.open('rw');
-    await file.write({ test: 'data' });
+    file.write({ test: 'data' });
     await file.close();
 
     await file.open('r');
@@ -531,9 +526,9 @@ describe.skipIf(!hasOPFS)('BJsonFile', () => {
   it('should delete file', async () => {
     const file = new BJsonFile('test-bjsonfile.bjson');
     await file.open('rw');
-    await file.write({ test: 'data' });
+    file.write({ test: 'data' });
+    await file.close();
     await file.delete();
-
     expect(await file.exists()).toBe(false);
   });
 });

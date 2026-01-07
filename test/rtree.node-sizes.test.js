@@ -25,15 +25,10 @@ try {
 }
 
 async function cleanup() {
-  try {
     const file = new BJsonFile('test-rtree-node-sizes.bjson');
     if (await file.exists()) {
-      await file.open('rw');
       await file.delete();
     }
-  } catch (error) {
-    // Ignore cleanup errors
-  }
 }
 
 describe.skipIf(!hasOPFS)('R-tree Node Size Handling', () => {

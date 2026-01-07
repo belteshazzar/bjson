@@ -205,7 +205,7 @@ await file.close();
 const file = new BJsonFile('data.bjson');
 await file.open('r');  // Open in read-only mode
 
-for await (const record of file.scan()) {
+for (const record of file.scan()) {
   console.log(record);
 }
 // Output:
@@ -256,7 +256,7 @@ await file.append({ id: 3 });
 const data = await file.read();
 
 // Scan without re-opening
-for await (const record of file.scan()) {
+for (const record of file.scan()) {
   console.log(record);
 }
 
@@ -437,7 +437,7 @@ for (let i = 1; i < products.length; i++) {
 
 // Read all products (same file handle)
 const allProducts = [];
-for await (const product of file.scan()) {
+for (const product of file.scan()) {
   allProducts.push(product);
 }
 

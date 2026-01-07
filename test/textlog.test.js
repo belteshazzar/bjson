@@ -34,15 +34,10 @@ describe.skipIf(!hasOPFS)('TextLog', function() {
   }
 
   async function cleanupFile(filename) {
-    try {
       const file = new BJsonFile(filename);
       if (await file.exists()) {
-        await file.open('rw');
         await file.delete();
       }
-    } catch (error) {
-      // Ignore cleanup errors
-    }
   }
 
   describe('Constructor', function() {

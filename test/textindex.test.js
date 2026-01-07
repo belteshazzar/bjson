@@ -38,15 +38,11 @@ describe.skipIf(!hasOPFS)('TextIndex', function() {
     ];
 
     for (const file of files) {
-      try {
         const handle = new BJsonFile(file);
         if (await handle.exists()) {
-          await handle.open('rw');
           await handle.delete();
         }
-      } catch (error) {
-        // ignore cleanup errors
-      }
+
     }
   }
 

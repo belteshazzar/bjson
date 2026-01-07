@@ -25,15 +25,10 @@ try {
 }
 
 async function cleanupFile(filename) {
-  try {
     const file = new BJsonFile(filename);
     if (await file.exists()) {
-      await file.open('rw');
       await file.delete();
     }
-  } catch (error) {
-    // Ignore cleanup errors
-  }
 }
 
 describe.skipIf(!hasOPFS)('BPlusTree Persistence', () => {
@@ -48,7 +43,7 @@ describe.skipIf(!hasOPFS)('BPlusTree Persistence', () => {
     let tree = new BPlusTree(filename, 3);
     await tree.open();
     
-    await tree.add(10, 'ten');
+    tree.add(10, 'ten');
     expect(tree.size()).toBe(1);
     
     await tree.close();
@@ -58,7 +53,7 @@ describe.skipIf(!hasOPFS)('BPlusTree Persistence', () => {
     await tree.open();
     
     expect(tree.size()).toBe(1);
-    expect(await tree.search(10)).toBe('ten');
+    expect(tree.search(10)).toBe('ten');
     
     await tree.close();
   });

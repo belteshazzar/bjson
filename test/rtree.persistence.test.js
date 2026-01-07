@@ -25,15 +25,10 @@ try {
 }
 
 async function cleanupFile(filename) {
-  try {
     const file = new BJsonFile(filename);
     if (await file.exists()) {
-      await file.open('rw');
       await file.delete();
     }
-  } catch (error) {
-    // Ignore cleanup errors
-  }
 }
 
 describe.skipIf(!hasOPFS)('RTree Persistence', () => {
@@ -50,7 +45,7 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
     let tree = new RTree(filename, 4);
     await tree.open();
     
-    await tree.insert(40.7128, -74.0060, id);
+    tree.insert(40.7128, -74.0060, id);
     expect(tree.size()).toBe(1);
     
     await tree.close();
@@ -67,7 +62,7 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
       minLng: -75,
       maxLng: -74
     };
-    const results = await tree.searchBBox(bbox);
+    const results = tree.searchBBox(bbox);
     expect(results).toHaveLength(1);
     expect(results[0].objectId).toEqual(id);
     expect(results[0].lat).toBeCloseTo(40.7128);
@@ -90,7 +85,7 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
     await tree.open();
     
     for (const point of points) {
-      await tree.insert(point.lat, point.lng, point.id);
+      tree.insert(point.lat, point.lng, point.id);
     }
     expect(tree.size()).toBe(points.length);
     
@@ -109,7 +104,7 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
       minLng: -125,
       maxLng: -66
     };
-    const results = await tree.searchBBox(bbox);
+    const results = tree.searchBBox(bbox);
     expect(results).toHaveLength(points.length);
     
     // Verify each point can be found
@@ -120,7 +115,7 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
         minLng: point.lng - 1,
         maxLng: point.lng + 1
       };
-      const found = await tree.searchBBox(pointBbox);
+      const found = tree.searchBBox(pointBbox);
       expect(found.some(p => p.objectId.equals(point.id))).toBe(true);
     }
     
@@ -136,9 +131,9 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
     let tree = new RTree(filename, 4);
     await tree.open();
     
-    await tree.insert(40.7128, -74.0060, id1); // NYC
-    await tree.insert(34.0522, -118.2437, id2); // LA
-    await tree.insert(41.8781, -87.6298, id3); // Chicago
+    tree.insert(40.7128, -74.0060, id1); // NYC
+    tree.insert(34.0522, -118.2437, id2); // LA
+    tree.insert(41.8781, -87.6298, id3); // Chicago
     
     await tree.close();
 
@@ -153,7 +148,7 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
       minLng: -75,
       maxLng: -73
     };
-    const results = await tree.searchBBox(bbox);
+    const results = tree.searchBBox(bbox);
     expect(results).toHaveLength(1);
     expect(results[0].objectId).toEqual(id1);
     
@@ -169,9 +164,9 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
     let tree = new RTree(filename, 4);
     await tree.open();
     
-    await tree.insert(40.7128, -74.0060, idNY);  // NYC
-    await tree.insert(40.7282, -74.1502, idNJ); // Jersey City (~10km)
-    await tree.insert(40.2206, -74.7597, idPA); // Princeton (~50km)
+    tree.insert(40.7128, -74.0060, idNY);  // NYC
+    tree.insert(40.7282, -74.1502, idNJ); // Jersey City (~10km)
+    tree.insert(40.2206, -74.7597, idPA); // Princeton (~50km)
     
     await tree.close();
 
@@ -182,7 +177,7 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
     expect(tree.size()).toBe(3);
     
     // Search within 25km of NYC
-    const results = await tree.searchRadius(40.7128, -74.0060, 25);
+    const results = tree.searchRadius(40.7128, -74.0060, 25);
     expect(results.length).toBeGreaterThanOrEqual(2); // NYC + Jersey City
     
     await tree.close();
@@ -209,7 +204,7 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
     await tree.open();
     
     for (const point of points) {
-      await tree.insert(point.lat, point.lng, point.id);
+      tree.insert(point.lat, point.lng, point.id);
     }
     expect(tree.size()).toBe(count);
     
@@ -228,7 +223,7 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
       minLng: -125,
       maxLng: -66
     };
-    const results = await tree.searchBBox(bbox);
+    const results = tree.searchBBox(bbox);
     expect(results).toHaveLength(count);
     
     await tree.close();
@@ -244,8 +239,8 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
     let tree = new RTree(filename, 4);
     await tree.open();
     
-    await tree.insert(40.7128, -74.0060, id1); // NYC
-    await tree.insert(34.0522, -118.2437, id2); // LA
+    tree.insert(40.7128, -74.0060, id1); // NYC
+    tree.insert(34.0522, -118.2437, id2); // LA
     
     await tree.close();
 
@@ -261,11 +256,11 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
       minLng: -75,
       maxLng: -73
     };
-    let results = await tree.searchBBox(bbox1);
+    let results = tree.searchBBox(bbox1);
     expect(results).toHaveLength(1);
     
-    await tree.insert(41.8781, -87.6298, id3); // Chicago
-    await tree.insert(39.7392, -104.9903, id4); // Denver
+    tree.insert(41.8781, -87.6298, id3); // Chicago
+    tree.insert(39.7392, -104.9903, id4); // Denver
     
     await tree.close();
 
@@ -281,7 +276,7 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
       minLng: -125,
       maxLng: -66
     };
-    results = await tree.searchBBox(bbox2);
+    results = tree.searchBBox(bbox2);
     expect(results).toHaveLength(4);
     
     await tree.close();
@@ -296,14 +291,14 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
     let tree = new RTree(filename, 4);
     await tree.open();
     
-    await tree.insert(40.7128, -74.0060, id1);
-    await tree.insert(34.0522, -118.2437, id2);
-    await tree.insert(41.8781, -87.6298, id3);
+    tree.insert(40.7128, -74.0060, id1);
+    tree.insert(34.0522, -118.2437, id2);
+    tree.insert(41.8781, -87.6298, id3);
     
     expect(tree.size()).toBe(3);
     
     // Delete one point
-    await tree.remove(id2);
+    tree.remove(id2);
     expect(tree.size()).toBe(2);
     
     await tree.close();
@@ -321,7 +316,7 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
       minLng: -122,
       maxLng: -116
     };
-    const results = await tree.searchBBox(bbox);
+    const results = tree.searchBBox(bbox);
     expect(results).toHaveLength(0);
     
     // Verify other points are still there
@@ -331,7 +326,7 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
       minLng: -125,
       maxLng: -66
     };
-    const allResults = await tree.searchBBox(bbox2);
+    const allResults = tree.searchBBox(bbox2);
     expect(allResults).toHaveLength(2);
     
     await tree.close();
@@ -354,7 +349,7 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
     for (let i = 0; i < count; i++) {
       const lat = 25 + Math.random() * 24;
       const lng = -125 + Math.random() * 59;
-      await tree.insert(lat, lng, ids[i]);
+      tree.insert(lat, lng, ids[i]);
     }
     
     expect(tree.size()).toBe(count);
@@ -375,7 +370,7 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
       minLng: -125,
       maxLng: -66
     };
-    const results = await tree.searchBBox(bbox);
+    const results = tree.searchBBox(bbox);
     expect(results).toHaveLength(count);
     
     await tree.close();
@@ -389,12 +384,12 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
     let tree = new RTree(filename, 4);
     await tree.open();
     
-    await tree.insert(40.7128, -74.0060, id1);
-    await tree.insert(34.0522, -118.2437, id2);
+    tree.insert(40.7128, -74.0060, id1);
+    tree.insert(34.0522, -118.2437, id2);
     
     // Remove all points
-    await tree.remove(id1);
-    await tree.remove(id2);
+    tree.remove(id1);
+    tree.remove(id2);
     
     expect(tree.size()).toBe(0);
     
@@ -412,7 +407,7 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
       minLng: -125,
       maxLng: -66
     };
-    const results = await tree.searchBBox(bbox);
+    const results = tree.searchBBox(bbox);
     expect(results).toHaveLength(0);
     
     await tree.close();
@@ -430,7 +425,7 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
     await tree.open();
     
     for (const point of midwestPoints) {
-      await tree.insert(point.lat, point.lng, point.id);
+      tree.insert(point.lat, point.lng, point.id);
     }
     
     await tree.close();
@@ -448,7 +443,7 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
       minLng: -110,
       maxLng: -85
     };
-    let results = await tree.searchBBox(largeBbox);
+    let results = tree.searchBBox(largeBbox);
     expect(results).toHaveLength(3);
     
     // Smaller bbox containing subset
@@ -458,7 +453,7 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
       minLng: -90,
       maxLng: -85
     };
-    results = await tree.searchBBox(smallBbox);
+    results = tree.searchBBox(smallBbox);
     expect(results).toHaveLength(1); // Only Chicago
     expect(results[0].objectId).toEqual(midwestPoints[0].id);
     

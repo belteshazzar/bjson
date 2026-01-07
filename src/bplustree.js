@@ -77,10 +77,10 @@ export class BPlusTree {
 
         if (exists) {
             await this.file.open('rw');
-            await this._loadMetadata();
+            this._loadMetadata();
         } else {
             await this.file.open('rw');
-            await this._initializeNewTree();
+            this._initializeNewTree();
         }
 
         this.isOpen = true;
@@ -99,21 +99,21 @@ export class BPlusTree {
     /**
      * Initialize a new empty tree
      */
-    async _initializeNewTree() {
+    _initializeNewTree() {
         const rootNode = new NodeData(0, true, [], [], [], null);
         this.nextNodeId = 1;
         this._size = 0;
 
-        const rootPointer = await this._saveNode(rootNode);
+        const rootPointer = this._saveNode(rootNode);
         this.rootPointer = rootPointer;
 
-        await this._saveMetadata();
+        this._saveMetadata();
     }
 
     /**
      * Save metadata to file
      */
-    async _saveMetadata() {
+    _saveMetadata() {
         const metadata = {
             version: 1,
             maxEntries: this.order,  // Renamed to match RTree size
@@ -123,14 +123,14 @@ export class BPlusTree {
             nextId: this.nextNodeId  // Renamed to match RTree size
         };
 
-        await this.file.append(metadata);
+        this.file.append(metadata);
     }
 
     /**
      * Load metadata from file
      */
-    async _loadMetadata() {
-        const fileSize = await this.file.getFileSize();
+    _loadMetadata() {
+        const fileSize = this.file.getFileSize();
         // Metadata object has 6 INT fields (now encoded as 8-byte ints) plus keys
         const METADATA_SIZE = 135;
         
@@ -139,7 +139,7 @@ export class BPlusTree {
         }
 
         const metadataOffset = fileSize - METADATA_SIZE;
-        const metadata = await this.file.read(metadataOffset);
+        const metadata = this.file.read(metadataOffset);
 
         if (!metadata || typeof metadata.maxEntries === 'undefined') {
             throw new Error(`Failed to read metadata: missing required fields`);
@@ -155,21 +155,21 @@ export class BPlusTree {
     /**
      * Save a node to disk
      */
-    async _saveNode(node) {
-        const offset = await this.file.getFileSize();
-        await this.file.append(node);
+    _saveNode(node) {
+        const offset = this.file.getFileSize();
+        this.file.append(node);
         return new Pointer(offset);
     }
 
     /**
      * Load a node from disk
      */
-    async _loadNode(pointer) {
+    _loadNode(pointer) {
         if (!(pointer instanceof Pointer)) {
             throw new Error('Expected Pointer object');
         }
 
-        const data = await this.file.read(pointer);
+        const data = this.file.read(pointer);
         return new NodeData(
             data.id,
             data.isLeaf,
@@ -183,22 +183,22 @@ export class BPlusTree {
     /**
      * Load root node
      */
-    async _loadRoot() {
-        return await this._loadNode(this.rootPointer);
+    _loadRoot() {
+        return this._loadNode(this.rootPointer);
     }
 
     /**
      * Search for a key
      */
-    async search(key) {
-        const root = await this._loadRoot();
+    search(key) {
+        const root = this._loadRoot();
         return this._searchNode(root, key);
     }
 
     /**
      * Internal search
      */
-    async _searchNode(node, key) {
+    _searchNode(node, key) {
         if (node.isLeaf) {
             for (let i = 0; i < node.keys.length; i++) {
                 if (key === node.keys[i]) {
@@ -211,7 +211,7 @@ export class BPlusTree {
             while (i < node.keys.length && key >= node.keys[i]) {
                 i++;
             }
-            const child = await this._loadNode(node.children[i]);
+            const child = this._loadNode(node.children[i]);
             return this._searchNode(child, key);
         }
     }
@@ -219,17 +219,17 @@ export class BPlusTree {
     /**
      * Insert a key-value pair
      */
-    async add(key, value) {
-        const root = await this._loadRoot();
-        const result = await this._addToNode(root, key, value);
+    add(key, value) {
+        const root = this._loadRoot();
+        const result = this._addToNode(root, key, value);
 
         let newRoot;
         if (result.newNode) {
             newRoot = result.newNode;
         } else {
             // Split occurred - save the split nodes and create new root with pointers
-            const leftPointer = await this._saveNode(result.left);
-            const rightPointer = await this._saveNode(result.right);
+            const leftPointer = this._saveNode(result.left);
+            const rightPointer = this._saveNode(result.right);
             newRoot = new NodeData(
                 this.nextNodeId++,
                 false,
@@ -240,17 +240,17 @@ export class BPlusTree {
             );
         }
 
-        const rootPointer = await this._saveNode(newRoot);
+        const rootPointer = this._saveNode(newRoot);
         this.rootPointer = rootPointer;
 
         this._size++;
-        await this._saveMetadata();
+        this._saveMetadata();
     }
 
     /**
      * Internal add
      */
-    async _addToNode(node, key, value) {
+    _addToNode(node, key, value) {
         if (node.isLeaf) {
             const keys = [...node.keys];
             const values = [...node.values];
@@ -299,18 +299,18 @@ export class BPlusTree {
                 childIdx++;
             }
 
-            const childNode = await this._loadNode(children[childIdx]);
-            const result = await this._addToNode(childNode, key, value);
+            const childNode = this._loadNode(children[childIdx]);
+            const result = this._addToNode(childNode, key, value);
 
             if (result.newNode) {
-                const newChildPointer = await this._saveNode(result.newNode);
+                const newChildPointer = this._saveNode(result.newNode);
                 children[childIdx] = newChildPointer;
                 return {
                     newNode: new NodeData(node.id, false, keys, [], children, null)
                 };
             } else {
-                const leftPointer = await this._saveNode(result.left);
-                const rightPointer = await this._saveNode(result.right);
+                const leftPointer = this._saveNode(result.left);
+                const rightPointer = this._saveNode(result.right);
 
                 keys.splice(childIdx, 0, result.splitKey);
                 children.splice(childIdx, 1, leftPointer, rightPointer);
@@ -343,9 +343,9 @@ export class BPlusTree {
     /**
      * Delete a key
      */
-    async delete(key) {
-        const root = await this._loadRoot();
-        const newRoot = await this._deleteFromNode(root, key);
+    delete(key) {
+        const root = this._loadRoot();
+        const newRoot = this._deleteFromNode(root, key);
 
         if (!newRoot) {
             return; // Key not found
@@ -353,20 +353,20 @@ export class BPlusTree {
 
         let finalRoot = newRoot;
         if (finalRoot.keys.length === 0 && !finalRoot.isLeaf && finalRoot.children.length > 0) {
-            finalRoot = await this._loadNode(finalRoot.children[0]);
+            finalRoot = this._loadNode(finalRoot.children[0]);
         }
 
-        const rootPointer = await this._saveNode(finalRoot);
+        const rootPointer = this._saveNode(finalRoot);
         this.rootPointer = rootPointer;
 
         this._size--;
-        await this._saveMetadata();
+        this._saveMetadata();
     }
 
     /**
      * Internal delete
      */
-    async _deleteFromNode(node, key) {
+    _deleteFromNode(node, key) {
         if (node.isLeaf) {
             const keyIndex = node.keys.indexOf(key);
 
@@ -386,15 +386,15 @@ export class BPlusTree {
                 i++;
             }
 
-            const childNode = await this._loadNode(node.children[i]);
-            const newChild = await this._deleteFromNode(childNode, key);
+            const childNode = this._loadNode(node.children[i]);
+            const newChild = this._deleteFromNode(childNode, key);
 
             if (!newChild) {
                 return null;
             }
 
             const newChildren = [...node.children];
-            const newChildPointer = await this._saveNode(newChild);
+            const newChildPointer = this._saveNode(newChild);
             newChildren[i] = newChildPointer;
 
             return new NodeData(node.id, false, [...node.keys], [], newChildren, null);
@@ -404,9 +404,9 @@ export class BPlusTree {
     /**
      * Get all entries as array
      */
-    async toArray() {
+    toArray() {
         const result = [];
-        await this._collectAllEntries(await this._loadRoot(), result);
+        this._collectAllEntries(this._loadRoot(), result);
         return result;
     }
 
@@ -414,7 +414,7 @@ export class BPlusTree {
      * Collect all entries in sorted order by traversing tree
      * @private
      */
-    async _collectAllEntries(node, result) {
+    _collectAllEntries(node, result) {
         if (node.isLeaf) {
             for (let i = 0; i < node.keys.length; i++) {
                 result.push({
@@ -424,8 +424,8 @@ export class BPlusTree {
             }
         } else {
             for (const childPointer of node.children) {
-                const child = await this._loadNode(childPointer);
-                await this._collectAllEntries(child, result);
+                const child = this._loadNode(childPointer);
+                this._collectAllEntries(child, result);
             }
         }
     }
@@ -447,9 +447,9 @@ export class BPlusTree {
     /**
      * Range search
      */
-    async rangeSearch(minKey, maxKey) {
+    rangeSearch(minKey, maxKey) {
         const result = [];
-        await this._rangeSearchNode(await this._loadRoot(), minKey, maxKey, result);
+        this._rangeSearchNode(this._loadRoot(), minKey, maxKey, result);
         return result;
     }
 
@@ -457,7 +457,7 @@ export class BPlusTree {
      * Range search helper that traverses tree
      * @private
      */
-    async _rangeSearchNode(node, minKey, maxKey, result) {
+    _rangeSearchNode(node, minKey, maxKey, result) {
         if (node.isLeaf) {
             for (let i = 0; i < node.keys.length; i++) {
                 if (node.keys[i] >= minKey && node.keys[i] <= maxKey) {
@@ -469,8 +469,8 @@ export class BPlusTree {
             }
         } else {
             for (const childPointer of node.children) {
-                const child = await this._loadNode(childPointer);
-                await this._rangeSearchNode(child, minKey, maxKey, result);
+                const child = this._loadNode(childPointer);
+                this._rangeSearchNode(child, minKey, maxKey, result);
             }
         }
     }
@@ -478,13 +478,13 @@ export class BPlusTree {
     /**
      * Get tree height
      */
-    async getHeight() {
+    getHeight() {
         let height = 0;
-        let current = await this._loadRoot();
+        let current = this._loadRoot();
 
         while (!current.isLeaf) {
             height++;
-            current = await this._loadNode(current.children[0]);
+            current = this._loadNode(current.children[0]);
         }
 
         return height;
@@ -508,11 +508,11 @@ export class BPlusTree {
         const oldSize = await this.file.getFileSize();
 
         // Rebuild a fresh tree with only the live entries
-        const entries = await this.toArray();
+        const entries = this.toArray();
         const newTree = new BPlusTree(destinationFilename, this.order);
         await newTree.open();
         for (const entry of entries) {
-            await newTree.add(entry.key, entry.value);
+            newTree.add(entry.key, entry.value);
         }
         await newTree.close();
 

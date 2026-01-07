@@ -585,7 +585,7 @@ class BJsonFile {
       throw new Error('Origin Private File System (OPFS) is not supported in this browser');
     }
 
-    this.root = await navigator.storage.getDirectory();
+    this.root = this.root || await navigator.storage.getDirectory();
     this.mode = mode;
 
     try {
@@ -617,17 +617,9 @@ class BJsonFile {
   async close() {
     if (this.syncAccessHandle) {
       // Flush any pending writes before closing
-      // Note: In the node-opfs polyfill (used for testing), these operations return Promises,
-      // but in real browsers they're synchronous
-      const flushResult = this.syncAccessHandle.flush();
-      if (flushResult instanceof Promise) {
-        await flushResult;
-      }
+      this.syncAccessHandle.flush();
       
-      const closeResult = this.syncAccessHandle.close();
-      if (closeResult instanceof Promise) {
-        await closeResult;
-      }
+      await this.syncAccessHandle.close();
       
       this.syncAccessHandle = null;
     }
@@ -658,7 +650,7 @@ class BJsonFile {
   /**
    * Read a range of bytes from the file
    */
-  async #readRange(start, length) {
+  #readRange(start, length) {
     this.ensureOpen();
     const buffer = new Uint8Array(length);
     const bytesRead = this.syncAccessHandle.read(buffer, { at: start });
@@ -671,23 +663,17 @@ class BJsonFile {
 
   /**
    * Get the current file size
-   * Note: In the node-opfs polyfill (used for testing), getSize returns a Promise,
-   * but in real browsers it's synchronous
    */
-  async getFileSize() {
+  getFileSize() {
     this.ensureOpen();
-    const size = this.syncAccessHandle.getSize();
-    // Handle both sync (real browser) and async (node-opfs polyfill) cases
-    return size instanceof Promise ? await size : size;
+    return this.syncAccessHandle.getSize();
   }
 
   /**
    * Write data to file, truncating existing content
-   * Uses synchronous operations internally but returns a Promise for API compatibility
-   * Changes are automatically flushed to disk
    * @param {*} data - Data to encode and write
    */
-  async write(data) {
+  write(data) {
     this.ensureWritable();
     
     // Encode data to binary
@@ -702,14 +688,13 @@ class BJsonFile {
 
   /**
    * Read and decode data from file starting at optional pointer offset
-   * Uses synchronous operations internally but returns a Promise for API compatibility
    * @param {Pointer} pointer - Optional offset to start reading from (default: 0)
    * @returns {*} - Decoded data
    */
-  async read(pointer = new Pointer(0)) {
+  read(pointer = new Pointer(0)) {
     this.ensureOpen();
     
-    const fileSize = await this.getFileSize();
+    const fileSize = this.getFileSize();
     
     if (fileSize === 0) {
       throw new Error(`File is empty: ${this.filename}`);
@@ -723,7 +708,7 @@ class BJsonFile {
     }
     
     // Read from pointer offset to end of file
-    const binaryData = await this.#readRange(pointerValue, fileSize - pointerValue);
+    const binaryData = this.#readRange(pointerValue, fileSize - pointerValue);
     
     // Decode and return the first value
     return decode(binaryData);
@@ -731,18 +716,16 @@ class BJsonFile {
 
   /**
    * Append data to file without truncating existing content
-   * Uses synchronous operations internally but returns a Promise for API compatibility
-   * Changes are automatically flushed to disk
    * @param {*} data - Data to encode and append
    */
-  async append(data) {
+  append(data) {
     this.ensureWritable();
     
     // Encode new data to binary
     const binaryData = encode(data);
     
     // Get current file size
-    const existingSize = await this.getFileSize();
+    const existingSize = this.getFileSize();
     
     // Write new data at end of file
     this.syncAccessHandle.write(binaryData, { at: existingSize });
@@ -750,24 +733,20 @@ class BJsonFile {
 
   /**
    * Explicitly flush any pending writes to disk
-   * Uses synchronous operations internally but returns a Promise for API compatibility
    */
-  async flush() {
+  flush() {
     this.ensureWritable();
-    const flushResult = this.syncAccessHandle.flush();
-    if (flushResult instanceof Promise) {
-      await flushResult;
-    }
+    this.syncAccessHandle.flush();
   }
 
   /**
    * Async generator to scan through all records in the file
    * Each record is decoded and yielded one at a time
    */
-  async *scan() {
+  *scan() {
     this.ensureOpen();
     
-    const fileSize = await this.getFileSize();
+    const fileSize = this.getFileSize();
       
       if (fileSize === 0) {
         return;
@@ -778,9 +757,9 @@ class BJsonFile {
       // Scan through and yield each top-level value
       while (offset < fileSize) {
         // Helper function to determine how many bytes a value occupies
-        const getValueSize = async (readPosition) => {
+        const getValueSize = (readPosition) => {
           // Read 1 byte for type
-          let tempData = await this.#readRange(readPosition, 1);
+          let tempData = this.#readRange(readPosition, 1);
           let pos = 1;
           const type = tempData[0];
           
@@ -801,7 +780,7 @@ class BJsonFile {
             
             case TYPE.STRING: {
               // Read length (4 bytes)
-              tempData = await this.#readRange(readPosition + 1, 4);
+              tempData = this.#readRange(readPosition + 1, 4);
               const view = new DataView(tempData.buffer, tempData.byteOffset, 4);
               const length = view.getUint32(0, true);
               return 1 + 4 + length;
@@ -809,7 +788,7 @@ class BJsonFile {
             
             case TYPE.BINARY: {
               // Read length (4 bytes)
-              tempData = await this.#readRange(readPosition + 1, 4);
+              tempData = this.#readRange(readPosition + 1, 4);
               const view = new DataView(tempData.buffer, tempData.byteOffset, 4);
               const length = view.getUint32(0, true);
               return 1 + 4 + length;
@@ -817,7 +796,7 @@ class BJsonFile {
             
             case TYPE.ARRAY: {
               // Read size in bytes (4 bytes)
-              tempData = await this.#readRange(readPosition + 1, 4);
+              tempData = this.#readRange(readPosition + 1, 4);
               const view = new DataView(tempData.buffer, tempData.byteOffset, 4);
               const size = view.getUint32(0, true);
               return 1 + 4 + size; // type + size + content
@@ -825,7 +804,7 @@ class BJsonFile {
             
             case TYPE.OBJECT: {
               // Read size in bytes (4 bytes)
-              tempData = await this.#readRange(readPosition + 1, 4);
+              tempData = this.#readRange(readPosition + 1, 4);
               const view = new DataView(tempData.buffer, tempData.byteOffset, 4);
               const size = view.getUint32(0, true);
               return 1 + 4 + size; // type + size + content
@@ -837,10 +816,10 @@ class BJsonFile {
         };
         
         // Determine size of the current value
-        const valueSize = await getValueSize(offset);
+        const valueSize = getValueSize(offset);
         
         // Read only the bytes needed for this value
-        const valueData = await this.#readRange(offset, valueSize);
+        const valueData = this.#readRange(offset, valueSize);
         offset += valueSize;
         
         // Decode and yield this value
@@ -849,12 +828,14 @@ class BJsonFile {
   }
 
   async delete() {
-    this.ensureWritable();
+    if (this.isOpen) {
+      throw new Error(`File is open. Call close() first`);
+    }
     
+    this.root = this.root || await navigator.storage.getDirectory();
+
     try {
       await this.root.removeEntry(this.filename);
-      // File is deleted, mark as closed
-      await this.close();
     } catch (error) {
       if (error.name === 'NotFoundError') {
         // File doesn't exist, nothing to delete
@@ -869,9 +850,10 @@ class BJsonFile {
       throw new Error('Origin Private File System (OPFS) is not supported in this browser');
     }
     
-    const root = await navigator.storage.getDirectory();
+    this.root = this.root || await navigator.storage.getDirectory();
+
     try {
-      await root.getFileHandle(this.filename);
+      await this.root.getFileHandle(this.filename);
       return true;
     } catch (error) {
       if (error.name === 'NotFoundError') {

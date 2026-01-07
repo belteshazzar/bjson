@@ -27,15 +27,10 @@ try {
 }
 
 async function cleanup() {
-  try {
     const file = new BJsonFile('test-rtree.bjson');
     if (await file.exists()) {
-      await file.open('rw');
       await file.delete();
     }
-  } catch (error) {
-    // Ignore cleanup errors
-  }
 }
 
 describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
@@ -78,9 +73,9 @@ describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
     const idLA = new ObjectId();
     const idCH = new ObjectId();
     
-    await tree.insert(40.7128, -74.0060, idNY);
-    await tree.insert(34.0522, -118.2437, idLA);
-    await tree.insert(41.8781, -87.6298, idCH);
+    tree.insert(40.7128, -74.0060, idNY);
+    tree.insert(34.0522, -118.2437, idLA);
+    tree.insert(41.8781, -87.6298, idCH);
 
     const bbox = {
       minLat: 40,
@@ -89,7 +84,7 @@ describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
       maxLng: -73
     };
 
-    const results = await tree.searchBBox(bbox);
+    const results = tree.searchBBox(bbox);
     expect(results).toHaveLength(1);
     expect(results[0].objectId).toEqual(idNY);
     expect(results[0].lat).toBeCloseTo(40.7128);

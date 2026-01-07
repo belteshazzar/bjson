@@ -36,15 +36,10 @@ function runCli(filePath) {
 }
 
 async function cleanupFile(filename) {
-  try {
     const file = new BJsonFile(filename);
     if (await file.exists()) {
-      await file.open('rw');
       await file.delete();
     }
-  } catch (error) {
-    // Ignore cleanup errors
-  }
 }
 
 describe.skipIf(!hasOPFS)('rtree-decode CLI', () => {

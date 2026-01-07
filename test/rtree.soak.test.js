@@ -31,15 +31,10 @@ try {
 }
 
 async function cleanup() {
-  try {
     const file = new BJsonFile('test-rtree-soak.bjson');
     if (await file.exists()) {
-      await file.open('rw');
       await file.delete();
     }
-  } catch (error) {
-    // Ignore cleanup errors
-  }
 }
 
 /**
@@ -103,7 +98,7 @@ describe.skipIf(!hasOPFS)('R-tree Soak Tests', { timeout: 30000 }, () => {
       const location = generateLocationWithId(i);
       
       const start = performance.now();
-      await tree.insert(location.lat, location.lng, location.objectId);
+      tree.insert(location.lat, location.lng, location.objectId);
       const elapsed = performance.now() - start;
       insertTimings.push(elapsed);
     }
@@ -134,7 +129,7 @@ describe.skipIf(!hasOPFS)('R-tree Soak Tests', { timeout: 30000 }, () => {
       const location = generateLocationWithId(i);
       
       const start = performance.now();
-      await tree.insert(location.lat, location.lng, location.objectId);
+      tree.insert(location.lat, location.lng, location.objectId);
       const elapsed = performance.now() - start;
       insertTimings.push(elapsed);
     }
@@ -159,7 +154,7 @@ describe.skipIf(!hasOPFS)('R-tree Soak Tests', { timeout: 30000 }, () => {
       };
 
       const start = performance.now();
-      const results = await tree.searchBBox(bbox);
+      const results = tree.searchBBox(bbox);
       const elapsed = performance.now() - start;
       
       queryTimings.push(elapsed);
@@ -193,7 +188,7 @@ describe.skipIf(!hasOPFS)('R-tree Soak Tests', { timeout: 30000 }, () => {
       const location = generateLocationWithId(i);
       
       const start = performance.now();
-      await tree.insert(location.lat, location.lng, location.objectId);
+      tree.insert(location.lat, location.lng, location.objectId);
       const elapsed = performance.now() - start;
       insertTimings.push(elapsed);
     }
@@ -215,7 +210,7 @@ describe.skipIf(!hasOPFS)('R-tree Soak Tests', { timeout: 30000 }, () => {
       const radiusKm = 50 + Math.random() * 200;
 
       const start = performance.now();
-      const results = await tree.searchRadius(centerLat, centerLng, radiusKm);
+      const results = tree.searchRadius(centerLat, centerLng, radiusKm);
       const elapsed = performance.now() - start;
       
       searchTimings.push(elapsed);
@@ -248,7 +243,7 @@ describe.skipIf(!hasOPFS)('R-tree Soak Tests', { timeout: 30000 }, () => {
       const location = generateLocationWithId(i);
       
       const start = performance.now();
-      await tree.insert(location.lat, location.lng, location.objectId);
+      tree.insert(location.lat, location.lng, location.objectId);
       const elapsed = performance.now() - start;
       insertTimings.push(elapsed);
 
@@ -290,11 +285,11 @@ describe.skipIf(!hasOPFS)('R-tree Soak Tests', { timeout: 30000 }, () => {
     console.log(`\n  Setting up ${insertCount} locations...`);
     for (let i = 0; i < insertCount; i++) {
       const location = generateLocationWithId(i);
-      await tree.insert(location.lat, location.lng, location.objectId);
+      tree.insert(location.lat, location.lng, location.objectId);
     }
 
     // Warm up
-    await tree.searchBBox({
+    tree.searchBBox({
       minLat: 30, maxLat: 40,
       minLng: -100, maxLng: -90
     });
@@ -317,7 +312,7 @@ describe.skipIf(!hasOPFS)('R-tree Soak Tests', { timeout: 30000 }, () => {
       };
 
       const start = performance.now();
-      await tree.searchBBox(bbox);
+      tree.searchBBox(bbox);
       bboxTimings.push(performance.now() - start);
     }
     const bboxTotal = performance.now() - bboxStart;
@@ -325,7 +320,7 @@ describe.skipIf(!hasOPFS)('R-tree Soak Tests', { timeout: 30000 }, () => {
     const radiusStart = performance.now();
     for (let i = 0; i < queryCount; i++) {
       const start = performance.now();
-      await tree.searchRadius(
+      tree.searchRadius(
         25 + Math.random() * 24,
         -125 + Math.random() * 59,
         100
@@ -359,7 +354,7 @@ describe.skipIf(!hasOPFS)('R-tree Soak Tests', { timeout: 30000 }, () => {
 
     for (let i = 0; i < insertCount; i++) {
       const location = generateLocationWithId(i);
-      await tree.insert(location.lat, location.lng, location.objectId);
+      tree.insert(location.lat, location.lng, location.objectId);
 
       if ((i + 1) % 2 === 0) {
         const currentMemory = process.memoryUsage();

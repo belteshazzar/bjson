@@ -28,15 +28,10 @@ describe.skipIf(!hasOPFS)('BPlusTree Compaction', function() {
   }
 
   async function cleanupFile(filename) {
-    try {
       const file = new BJsonFile(filename);
       if (await file.exists()) {
-        await file.open('rw');
         await file.delete();
       }
-    } catch (error) {
-      // ignore cleanup errors
-    }
   }
 
   let tree;
