@@ -731,9 +731,9 @@ class BJsonFile {
   }
 
   /**
-   * Read a range of bytes from the file (synchronous)
+   * Read a range of bytes from the file
    */
-  #readRange(start, length) {
+  async #readRange(start, length) {
     this.ensureOpen();
     const buffer = new Uint8Array(length);
     const bytesRead = this.syncAccessHandle.read(buffer, { at: start });
@@ -745,11 +745,14 @@ class BJsonFile {
   }
 
   /**
-   * Get the current file size (synchronous)
+   * Get the current file size
+   * Note: In node-opfs this is async, but in real browsers it's synchronous
    */
-  getFileSize() {
+  async getFileSize() {
     this.ensureOpen();
-    return this.syncAccessHandle.getSize();
+    const size = this.syncAccessHandle.getSize();
+    // Handle both sync (real browser) and async (node-opfs polyfill) cases
+    return size instanceof Promise ? await size : size;
   }
 
   /**
@@ -768,7 +771,7 @@ class BJsonFile {
     this.syncAccessHandle.truncate(0);
     
     // Write data at beginning of file
-    this.syncAccessHandle.write(binaryData, { at: 0 });
+    const written = this.syncAccessHandle.write(binaryData, { at: 0 });
     
     // Flush changes to disk
     this.syncAccessHandle.flush();
@@ -783,7 +786,7 @@ class BJsonFile {
   async read(pointer = new Pointer(0)) {
     this.ensureOpen();
     
-    const fileSize = this.getFileSize();
+    const fileSize = await this.getFileSize();
     
     if (fileSize === 0) {
       throw new Error(`File is empty: ${this.filename}`);
@@ -797,7 +800,7 @@ class BJsonFile {
     }
     
     // Read from pointer offset to end of file
-    const binaryData = this.#readRange(pointerValue, fileSize - pointerValue);
+    const binaryData = await this.#readRange(pointerValue, fileSize - pointerValue);
     
     // Decode and return the first value
     return decode(binaryData);
@@ -816,7 +819,7 @@ class BJsonFile {
     const binaryData = encode(data);
     
     // Get current file size
-    const existingSize = this.getFileSize();
+    const existingSize = await this.getFileSize();
     
     // Write new data at end of file
     this.syncAccessHandle.write(binaryData, { at: existingSize });
@@ -841,7 +844,7 @@ class BJsonFile {
   async *scan() {
     this.ensureOpen();
     
-    const fileSize = this.getFileSize();
+    const fileSize = await this.getFileSize();
       
       if (fileSize === 0) {
         return;
@@ -852,9 +855,9 @@ class BJsonFile {
       // Scan through and yield each top-level value
       while (offset < fileSize) {
         // Helper function to determine how many bytes a value occupies
-        const getValueSize = (readPosition) => {
+        const getValueSize = async (readPosition) => {
           // Read 1 byte for type
-          let tempData = this.#readRange(readPosition, 1);
+          let tempData = await this.#readRange(readPosition, 1);
           let pos = 1;
           const type = tempData[0];
           
@@ -876,7 +879,7 @@ class BJsonFile {
             
             case TYPE.STRING: {
               // Read length (4 bytes)
-              tempData = this.#readRange(readPosition + 1, 4);
+              tempData = await this.#readRange(readPosition + 1, 4);
               const view = new DataView(tempData.buffer, tempData.byteOffset, 4);
               const length = view.getUint32(0, true);
               return 1 + 4 + length;
@@ -884,7 +887,7 @@ class BJsonFile {
             
             case TYPE.BINARY: {
               // Read length (4 bytes)
-              tempData = this.#readRange(readPosition + 1, 4);
+              tempData = await this.#readRange(readPosition + 1, 4);
               const view = new DataView(tempData.buffer, tempData.byteOffset, 4);
               const length = view.getUint32(0, true);
               return 1 + 4 + length;
@@ -892,7 +895,7 @@ class BJsonFile {
             
             case TYPE.ARRAY: {
               // Read size in bytes (4 bytes)
-              tempData = this.#readRange(readPosition + 1, 4);
+              tempData = await this.#readRange(readPosition + 1, 4);
               const view = new DataView(tempData.buffer, tempData.byteOffset, 4);
               const size = view.getUint32(0, true);
               return 1 + 4 + size; // type + size + content
@@ -900,7 +903,7 @@ class BJsonFile {
             
             case TYPE.OBJECT: {
               // Read size in bytes (4 bytes)
-              tempData = this.#readRange(readPosition + 1, 4);
+              tempData = await this.#readRange(readPosition + 1, 4);
               const view = new DataView(tempData.buffer, tempData.byteOffset, 4);
               const size = view.getUint32(0, true);
               return 1 + 4 + size; // type + size + content
@@ -912,10 +915,10 @@ class BJsonFile {
         };
         
         // Determine size of the current value
-        const valueSize = getValueSize(offset);
+        const valueSize = await getValueSize(offset);
         
         // Read only the bytes needed for this value
-        const valueData = this.#readRange(offset, valueSize);
+        const valueData = await this.#readRange(offset, valueSize);
         offset += valueSize;
         
         // Decode and yield this value
