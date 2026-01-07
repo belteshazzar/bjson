@@ -702,8 +702,17 @@ class BJsonFile {
   async close() {
     if (this.syncAccessHandle) {
       // Flush any pending writes before closing
-      this.syncAccessHandle.flush();
-      this.syncAccessHandle.close();
+      // Note: In node-opfs these are async, but in real browsers they're synchronous
+      const flushResult = this.syncAccessHandle.flush();
+      if (flushResult instanceof Promise) {
+        await flushResult;
+      }
+      
+      const closeResult = this.syncAccessHandle.close();
+      if (closeResult instanceof Promise) {
+        await closeResult;
+      }
+      
       this.syncAccessHandle = null;
     }
     this.isOpen = false;
@@ -774,7 +783,11 @@ class BJsonFile {
     const written = this.syncAccessHandle.write(binaryData, { at: 0 });
     
     // Flush changes to disk
-    this.syncAccessHandle.flush();
+    // Note: In node-opfs this is async, but in real browsers it's synchronous
+    const flushResult = this.syncAccessHandle.flush();
+    if (flushResult instanceof Promise) {
+      await flushResult;
+    }
   }
 
   /**
@@ -825,7 +838,11 @@ class BJsonFile {
     this.syncAccessHandle.write(binaryData, { at: existingSize });
     
     // Flush changes to disk
-    this.syncAccessHandle.flush();
+    // Note: In node-opfs this is async, but in real browsers it's synchronous
+    const flushResult = this.syncAccessHandle.flush();
+    if (flushResult instanceof Promise) {
+      await flushResult;
+    }
   }
 
   /**
@@ -834,7 +851,10 @@ class BJsonFile {
    */
   async flush() {
     this.ensureWritable();
-    this.syncAccessHandle.flush();
+    const flushResult = this.syncAccessHandle.flush();
+    if (flushResult instanceof Promise) {
+      await flushResult;
+    }
   }
 
   /**
