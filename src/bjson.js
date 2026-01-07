@@ -702,7 +702,8 @@ class BJsonFile {
   async close() {
     if (this.syncAccessHandle) {
       // Flush any pending writes before closing
-      // Note: In node-opfs these are async, but in real browsers they're synchronous
+      // Note: In the node-opfs polyfill (used for testing), these operations return Promises,
+      // but in real browsers they're synchronous
       const flushResult = this.syncAccessHandle.flush();
       if (flushResult instanceof Promise) {
         await flushResult;
@@ -755,7 +756,8 @@ class BJsonFile {
 
   /**
    * Get the current file size
-   * Note: In node-opfs this is async, but in real browsers it's synchronous
+   * Note: In the node-opfs polyfill (used for testing), getSize returns a Promise,
+   * but in real browsers it's synchronous
    */
   async getFileSize() {
     this.ensureOpen();
@@ -780,10 +782,11 @@ class BJsonFile {
     this.syncAccessHandle.truncate(0);
     
     // Write data at beginning of file
-    const written = this.syncAccessHandle.write(binaryData, { at: 0 });
+    this.syncAccessHandle.write(binaryData, { at: 0 });
     
     // Flush changes to disk
-    // Note: In node-opfs this is async, but in real browsers it's synchronous
+    // Note: In the node-opfs polyfill (used for testing), flush returns a Promise,
+    // but in real browsers it's synchronous
     const flushResult = this.syncAccessHandle.flush();
     if (flushResult instanceof Promise) {
       await flushResult;
@@ -838,7 +841,8 @@ class BJsonFile {
     this.syncAccessHandle.write(binaryData, { at: existingSize });
     
     // Flush changes to disk
-    // Note: In node-opfs this is async, but in real browsers it's synchronous
+    // Note: In the node-opfs polyfill (used for testing), flush returns a Promise,
+    // but in real browsers it's synchronous
     const flushResult = this.syncAccessHandle.flush();
     if (flushResult instanceof Promise) {
       await flushResult;
