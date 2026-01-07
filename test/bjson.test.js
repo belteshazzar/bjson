@@ -2,7 +2,7 @@
  * Test suite for bjson encoder/decoder
  */
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
-import { TYPE, ObjectId, Pointer, Timestamp, encode, decode, BJsonFile } from '../src/bjson.js';
+import { TYPE, ObjectId, Pointer, encode, decode, BJsonFile } from '../src/bjson.js';
 
 // Set up node-opfs for Node.js environment
 let hasOPFS = false;
@@ -161,54 +161,6 @@ describe('Binary JSON Encoder/Decoder', () => {
     it('should validate ObjectId format', () => {
       expect(ObjectId.isValid('507f1f77bcf86cd799439011')).toBe(true);
       expect(ObjectId.isValid('invalid')).toBe(false);
-    });
-  });
-
-  describe('TIMESTAMP', () => {
-    it('should encode timestamp to 9 bytes', () => {
-      const ts = new Timestamp(1700000000, 42);
-      const encoded = encode(ts);
-      expect(encoded).toHaveLength(9);
-      expect(encoded[0]).toBe(TYPE.TIMESTAMP);
-    });
-
-    it('should round-trip timestamp', () => {
-      const ts = new Timestamp(1700000000, 1234);
-      const decoded = decode(encode(ts));
-      expect(decoded).toBeInstanceOf(Timestamp);
-      expect(decoded.t).toBe(1700000000);
-      expect(decoded.i).toBe(1234);
-    });
-
-    it('should convert to and from bigint', () => {
-      const ts = new Timestamp(1, 2);
-      const combined = ts.toBigInt();
-      expect(combined).toBe((1n << 32n) | 2n);
-      const from = Timestamp.fromBigInt(combined);
-      expect(from.equals(ts)).toBe(true);
-    });
-
-    it('should throw on invalid ranges', () => {
-      expect(() => new Timestamp(-1, 0)).toThrow();
-      expect(() => new Timestamp(0, -1)).toThrow();
-      expect(() => new Timestamp(0x1_0000_0000, 0)).toThrow();
-      expect(() => new Timestamp(0, 0x1_0000_0000)).toThrow();
-    });
-
-    it('should default to current time with millisecond increment', () => {
-      const before = Date.now();
-      const ts = new Timestamp();
-      const after = Date.now();
-
-      // seconds should be within the captured window (allow 1s skew)
-      const minSec = Math.floor(before / 1000) - 1;
-      const maxSec = Math.floor(after / 1000) + 1;
-      expect(ts.t).toBeGreaterThanOrEqual(minSec);
-      expect(ts.t).toBeLessThanOrEqual(maxSec);
-
-      // increment should be millisecond offset within the second
-      expect(ts.i).toBeGreaterThanOrEqual(0);
-      expect(ts.i).toBeLessThan(1000);
     });
   });
 

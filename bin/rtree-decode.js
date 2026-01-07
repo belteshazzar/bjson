@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { RTree } from '../src/rtree.js';
-import { ObjectId, Pointer, Timestamp } from '../src/bjson.js';
+import { ObjectId, Pointer } from '../src/bjson.js';
 
 // Set up node-opfs for Node.js environment
 try {
@@ -43,10 +43,6 @@ function formatValue(value) {
 
     if (val instanceof Date) {
       return `Date(${val.toISOString()})`;
-    }
-
-    if (val instanceof Timestamp) {
-      return `Timestamp({ t: ${val.seconds}, i: ${val.increment} })`;
     }
 
     if (Array.isArray(val)) {

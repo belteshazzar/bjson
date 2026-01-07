@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { readFile } from 'fs/promises';
-import { decode, TYPE, ObjectId, Pointer, Timestamp } from '../src/bjson.js';
+import { decode, TYPE, ObjectId, Pointer } from '../src/bjson.js';
 
 function usage() {
   console.error('Usage: bjson-decode <file.bjson>');
@@ -26,8 +26,6 @@ function getValueSize(data, start) {
       return 1 + 8;
     case TYPE.OID:
       return 1 + 12;
-    case TYPE.TIMESTAMP:
-      return 1 + 8;
     case TYPE.DATE:
       return 1 + 8;
     case TYPE.POINTER:
@@ -73,10 +71,6 @@ function formatValue(value) {
 
     if (val instanceof Date) {
       return `Date(${val.toISOString()})`;
-    }
-
-    if (val instanceof Timestamp) {
-      return `Timestamp({ t: ${val.seconds}, i: ${val.increment} })`;
     }
 
     if (Array.isArray(val)) {

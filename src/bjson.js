@@ -16,7 +16,6 @@ const TYPE = {
   DATE: 0x07,
   POINTER: 0x08,
   BINARY: 0x09,
-  TIMESTAMP: 0x0A,
   ARRAY: 0x10,
   OBJECT: 0x11
 };
@@ -157,83 +156,6 @@ class ObjectId {
   }
 }
 
-const UINT32_MAX = 0xFFFFFFFF;
-
-/**
- * Timestamp class - MongoDB-compatible BSON Timestamp
- * Represents a 64-bit value where the high 32 bits are seconds since epoch
- * and the low 32 bits are an incrementing ordinal.
- */
-class Timestamp {
-  constructor(seconds = 0, increment = 0) {
-
-    // If called with no args, capture current time
-    if (arguments.length === 0) {
-      const now = Date.now();
-      seconds = Math.floor(now / 1000);
-      increment = now % 1000; // milliseconds within the current second
-    }
-    
-    if (seconds instanceof Timestamp) {
-      this.t = seconds.t;
-      this.i = seconds.i;
-      return;
-    }
-
-    if (!Number.isInteger(seconds) || seconds < 0 || seconds > 0xFFFFFFFF) {
-      throw new Error('Timestamp seconds must be a uint32');
-    }
-    if (!Number.isInteger(increment) || increment < 0 || increment > 0xFFFFFFFF) {
-      throw new Error('Timestamp increment must be a uint32');
-    }
-
-    this.t = seconds >>> 0;
-    this.i = increment >>> 0;
-  }
-
-  toBigInt() {
-    return (BigInt(this.t) << 32n) | BigInt(this.i);
-  }
-
-  toBytes() {
-    const buffer = new ArrayBuffer(8);
-    const view = new DataView(buffer);
-    view.setBigUint64(0, this.toBigInt(), true);
-    return new Uint8Array(buffer);
-  }
-
-  valueOf() {
-		return this.t * (UINT32_MAX + 1) + this.i;
-	}
-
-  equals(other) {
-    if (!(other instanceof Timestamp)) {
-      return false;
-    }
-    return this.t === other.t && this.i === other.i;
-  }
-
-  toJSON() {
-    return { $timestamp: { t: this.t, i: this.i } };
-  }
-
-  toString() {
-    return `Timestamp({ t: ${this.t}, i: ${this.i} })`;
-  }
-
-  static fromBigInt(value) {
-    if (typeof value !== 'bigint') {
-      throw new Error('Timestamp.fromBigInt requires a bigint');
-    }
-    if (value < 0n || value > 0xFFFFFFFFFFFFFFFFn) {
-      throw new Error('Timestamp value out of range');
-    }
-    const seconds = Number((value >> 32n) & 0xFFFFFFFFn);
-    const increment = Number(value & 0xFFFFFFFFn);
-    return new Timestamp(seconds, increment);
-  }
-}
-
 /**
  * Pointer class - represents a 64-bit file offset pointer
  * Used to store file offsets for referenced data structures
@@ -312,9 +234,6 @@ function encode(value) {
       buffers.push(new Uint8Array([TYPE.TRUE]));
     } else if (val instanceof ObjectId) {
       buffers.push(new Uint8Array([TYPE.OID]));
-      buffers.push(val.toBytes());
-    } else if (val instanceof Timestamp) {
-      buffers.push(new Uint8Array([TYPE.TIMESTAMP]));
       buffers.push(val.toBytes());
     } else if (val instanceof Date) {
       buffers.push(new Uint8Array([TYPE.DATE]));
@@ -518,16 +437,6 @@ function decode(data) {
         return new ObjectId(oidBytes);
       }
 
-      case TYPE.TIMESTAMP: {
-        if (offset + 8 > data.length) {
-          throw new Error('Unexpected end of data for TIMESTAMP');
-        }
-        const view = new DataView(data.buffer, data.byteOffset + offset, 8);
-        const tsValue = view.getBigUint64(0, true);
-        offset += 8;
-        return Timestamp.fromBigInt(tsValue);
-      }
-      
       case TYPE.DATE: {
         if (offset + 8 > data.length) {
           throw new Error('Unexpected end of data for DATE');
@@ -789,14 +698,6 @@ class BJsonFile {
     
     // Write data at beginning of file
     this.syncAccessHandle.write(binaryData, { at: 0 });
-    
-    // Flush changes to disk
-    // Note: In the node-opfs polyfill (used for testing), flush returns a Promise,
-    // but in real browsers it's synchronous
-    const flushResult = this.syncAccessHandle.flush();
-    if (flushResult instanceof Promise) {
-      await flushResult;
-    }
   }
 
   /**
@@ -845,14 +746,6 @@ class BJsonFile {
     
     // Write new data at end of file
     this.syncAccessHandle.write(binaryData, { at: existingSize });
-    
-    // Flush changes to disk
-    // Note: In the node-opfs polyfill (used for testing), flush returns a Promise,
-    // but in real browsers it's synchronous
-    const flushResult = this.syncAccessHandle.flush();
-    if (flushResult instanceof Promise) {
-      await flushResult;
-    }
   }
 
   /**
@@ -900,7 +793,6 @@ class BJsonFile {
             case TYPE.INT:
             case TYPE.FLOAT:
             case TYPE.DATE:
-            case TYPE.TIMESTAMP:
             case TYPE.POINTER:
               return 1 + 8;
 
@@ -993,7 +885,6 @@ class BJsonFile {
 export {
   TYPE,
   ObjectId,
-  Timestamp,
   Pointer,
   encode,
   decode,
