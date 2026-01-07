@@ -157,6 +157,8 @@ class ObjectId {
   }
 }
 
+const UINT32_MAX = 0xFFFFFFFF;
+
 /**
  * Timestamp class - MongoDB-compatible BSON Timestamp
  * Represents a 64-bit value where the high 32 bits are seconds since epoch
@@ -199,6 +201,10 @@ class Timestamp {
     view.setBigUint64(0, this.toBigInt(), true);
     return new Uint8Array(buffer);
   }
+
+  valueOf() {
+		return this.t * (UINT32_MAX + 1) + this.i;
+	}
 
   equals(other) {
     if (!(other instanceof Timestamp)) {
