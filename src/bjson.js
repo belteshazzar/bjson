@@ -173,8 +173,8 @@ class Timestamp {
     }
     
     if (seconds instanceof Timestamp) {
-      this.t = seconds.seconds;
-      this.i = seconds.increment;
+      this.t = seconds.t;
+      this.i = seconds.i;
       return;
     }
 
@@ -208,7 +208,7 @@ class Timestamp {
   }
 
   toJSON() {
-    return { t: this.t, i: this.i };
+    return { $timestamp: { t: this.t, i: this.i } };
   }
 
   toString() {
