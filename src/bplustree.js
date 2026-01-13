@@ -411,6 +411,47 @@ export class BPlusTree {
     }
 
     /**
+     * Async iterator for efficiently traversing all entries without loading everything into memory
+     * Enables usage: `for await (const entry of tree) { ... }`
+     * Each entry has shape: { key, value }
+     */
+    async *[Symbol.asyncIterator]() {
+        if (!this.isOpen) {
+            throw new Error('Tree must be open before iteration');
+        }
+
+        if (this._size === 0) {
+            return;
+        }
+
+        // Use a stack-based traversal instead of relying on next pointers
+        // since the persistent/immutable structure makes maintaining leaf links complex
+        yield* this._iterateNode(this._loadRoot());
+    }
+
+    /**
+     * Helper generator to recursively iterate through a node
+     * @private
+     */
+    *_iterateNode(node) {
+        if (node.isLeaf) {
+            // Yield all entries in this leaf
+            for (let i = 0; i < node.keys.length; i++) {
+                yield {
+                    key: node.keys[i],
+                    value: node.values[i]
+                };
+            }
+        } else {
+            // Recursively iterate through all children in order
+            for (const childPointer of node.children) {
+                const child = this._loadNode(childPointer);
+                yield* this._iterateNode(child);
+            }
+        }
+    }
+
+    /**
      * Collect all entries in sorted order by traversing tree
      * @private
      */

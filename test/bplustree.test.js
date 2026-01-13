@@ -320,6 +320,102 @@ describe.skipIf(!hasOPFS)('BPlusTree', function() {
         });
     });
 
+    describe('Async Iterator', function() {
+        let tree;
+        let filename;
+
+        beforeEach(async function() {
+            filename = getTestFilename();
+            tree = new BPlusTree(filename, 3);
+            await tree.open();
+        });
+
+        afterEach(async function() {
+            if (tree && tree.isOpen) {
+                await tree.close();
+            }
+            await cleanupFile(filename);
+        });
+
+        it('should iterate empty tree', async function() {
+            const result = [];
+            for await (const entry of tree) {
+                result.push(entry);
+            }
+            expect(result).toEqual([]);
+        });
+
+        it('should iterate all elements in sorted order', async function() {
+            const keys = [5, 2, 8, 1, 9, 3];
+            for (const key of keys) {
+                await tree.add(key, `value${key}`);
+            }
+
+            const result = [];
+            for await (const entry of tree) {
+                result.push(entry);
+            }
+
+            expect(result.length).toBe(6);
+
+            // Verify sorted order
+            for (let i = 0; i < result.length - 1; i++) {
+                expect(result[i].key).toBeLessThan(result[i + 1].key);
+            }
+
+            // Verify content matches toArray
+            expect(result).toEqual([
+                {key: 1, value: 'value1'},
+                {key: 2, value: 'value2'},
+                {key: 3, value: 'value3'},
+                {key: 5, value: 'value5'},
+                {key: 8, value: 'value8'},
+                {key: 9, value: 'value9'}
+            ]);
+        });
+
+        it('should iterate large dataset efficiently', async function() {
+            // Add more entries to force multiple leaf nodes
+            const count = 100;
+            for (let i = 0; i < count; i++) {
+                await tree.add(i, `value${i}`);
+            }
+
+            let iterationCount = 0;
+            let lastKey = -1;
+
+            for await (const entry of tree) {
+                expect(entry.key).toBeGreaterThan(lastKey); // Verify sorted
+                expect(entry.value).toBe(`value${entry.key}`);
+                lastKey = entry.key;
+                iterationCount++;
+            }
+
+            expect(iterationCount).toBe(count);
+        });
+
+        it('should throw error if tree not open', async function() {
+            await tree.close();
+            
+            await expect(async () => {
+                for await (const entry of tree) {
+                    // Should not reach here
+                }
+            }).rejects.toThrow('Tree must be open before iteration');
+        });
+
+        it('should handle single element', async function() {
+            await tree.add(42, 'answer');
+
+            const result = [];
+            for await (const entry of tree) {
+                result.push(entry);
+            }
+
+            expect(result).toEqual([{key: 42, value: 'answer'}]);
+        });
+    });
+
     describe('rangeSearch', function() {
         let tree;
         let filename;
