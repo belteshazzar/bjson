@@ -22,9 +22,38 @@
 
   <script type="module">
     import { RTree } from '/src/rtree.js';
+    import { ObjectId } from '/src/bjson.js';
 
     const output = document.getElementById('output');
     const runBtn = document.getElementById('run');
+
+    // Initialize web worker for sync file operations
+    const worker = new Worker('/dist/worker.js');
+    let workerMessageId = 0;
+    const workerPromises = new Map();
+    
+    worker.addEventListener('message', (event) => {
+      const { id, result, error } = event.data;
+      const promise = workerPromises.get(id);
+      
+      if (promise) {
+        if (error) {
+          promise.reject(new Error(error));
+        } else {
+          promise.resolve(result);
+        }
+        workerPromises.delete(id);
+      }
+    });
+    
+    function callWorker(operation, filename, data) {
+      return new Promise((resolve, reject) => {
+        const id = ++workerMessageId;
+        workerPromises.set(id, { resolve, reject });
+        
+        worker.postMessage({ id, operation, filename, data });
+      });
+    }
 
     function log(line) {
       output.textContent += `${line}\n`;
@@ -53,44 +82,62 @@
       await cleanup(filename);
       await cleanup(compacted);
 
-      const tree = new RTree(filename, 4);
-      await tree.open();
+      try {
+        log('Creating R-tree...');
+        await callWorker('rtree-create', filename, { order: 4 });
+        
+        log('Inserting points...');
+        const points = [
+          { id: 'sf', lat: 37.7749, lng: -122.4194 },
+          { id: 'la', lat: 34.0522, lng: -118.2437 },
+          { id: 'nyc', lat: 40.7128, lng: -74.0060 },
+          { id: 'chi', lat: 41.8781, lng: -87.6298 }
+        ];
 
-      const points = [
-        { id: 'sf', lat: 37.7749, lng: -122.4194 },
-        { id: 'la', lat: 34.0522, lng: -118.2437 },
-        { id: 'nyc', lat: 40.7128, lng: -74.0060 },
-        { id: 'chi', lat: 41.8781, lng: -87.6298 }
-      ];
+        for (const point of points) {
+          // Create ObjectId for each point
+          const oid = new ObjectId();
+          await callWorker('rtree-insert', filename, { 
+            lat: point.lat, 
+            lng: point.lng, 
+            objectId: oid.toString() 
+          });
+        }
 
-      for (const point of points) {
-        await tree.insert(point.lat, point.lng, point.id);
+        log('\n=== Before Compaction ===');
+        const radiusResults = await callWorker('rtree-searchRadius', filename, { 
+          lat: 37.7749, 
+          lng: -122.4194, 
+          radiusKm: 500 
+        });
+        log(`Within 500km of SF: ${JSON.stringify(radiusResults)}`);
+
+        const bboxResults = await callWorker('rtree-searchBBox', filename, {
+          bbox: {
+            minLat: 30,
+            maxLat: 42,
+            minLng: -125,
+            maxLng: -70
+          }
+        });
+        log(`BBox covering US entries: ${JSON.stringify(bboxResults)}`);
+
+        log('\n=== Compacting ===');
+        const stats = await callWorker('rtree-compact', filename, { compactFilename: compacted });
+        log('Compaction stats:');
+        log(JSON.stringify(stats, null, 2));
+
+        log('\n=== After Compaction ===');
+        const postCompactResults = await callWorker('rtree-searchRadius', compacted, { 
+          lat: 39, 
+          lng: -98, 
+          radiusKm: 2500 
+        });
+        log(`Within 2500km of US center: ${JSON.stringify(postCompactResults, null, 2)}`);
+      } catch (err) {
+        log(`Error: ${err.message || err}`);
+        console.error(err);
       }
-
-      log('=== Before Compaction ===');
-      const radiusResults = await tree.searchRadius(37.7749, -122.4194, 500);
-      log(`Within 500km of SF: ${JSON.stringify(radiusResults)}`);
-
-      const bboxResults = await tree.searchBBox({
-        minLat: 30,
-        maxLat: 42,
-        minLng: -125,
-        maxLng: -70
-      });
-      log(`BBox covering US entries: ${JSON.stringify(bboxResults)}`);
-
-      const stats = await tree.compact(compacted);
-      log('\n=== Compaction Stats ===');
-      log(JSON.stringify(stats, null, 2));
-
-      await tree.close();
-
-      log('\n=== After Compaction ===');
-      const newTree = new RTree(compacted, 4);
-      await newTree.open();
-      const postCompactResults = await newTree.searchRadius(39, -98, 2500);
-      log(`Within 2500km of US center: ${JSON.stringify(postCompactResults, null, 2)}`);
-      await newTree.close();
     }
 
     runBtn.addEventListener('click', () => runDemo().catch((err) => {

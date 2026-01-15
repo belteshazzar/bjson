@@ -21,10 +21,36 @@
   </div>
 
   <script type="module">
-    import { TextIndex } from '/src/textindex.js';
-
     const output = document.getElementById('output');
     const runBtn = document.getElementById('run');
+
+    // Initialize web worker for sync file operations
+    const worker = new Worker('/dist/worker.js');
+    let workerMessageId = 0;
+    const workerPromises = new Map();
+    
+    worker.addEventListener('message', (event) => {
+      const { id, result, error } = event.data;
+      const promise = workerPromises.get(id);
+      
+      if (promise) {
+        if (error) {
+          promise.reject(new Error(error));
+        } else {
+          promise.resolve(result);
+        }
+        workerPromises.delete(id);
+      }
+    });
+    
+    function callWorker(operation, filename, data) {
+      return new Promise((resolve, reject) => {
+        const id = ++workerMessageId;
+        workerPromises.set(id, { resolve, reject });
+        
+        worker.postMessage({ id, operation, filename, data });
+      });
+    }
 
     function log(line) {
       output.textContent += `${line}\n`;
@@ -46,6 +72,17 @@
         }
       }
     }
+    
+    async function getFileSize(filename) {
+      const root = await navigator.storage.getDirectory();
+      try {
+        const fileHandle = await root.getFileHandle(filename);
+        const file = await fileHandle.getFile();
+        return file.size;
+      } catch {
+        return 0;
+      }
+    }
 
     async function runDemo() {
       output.textContent = '';
@@ -61,30 +98,88 @@
       await cleanupBase(baseName);
       await cleanupBase(compactBase);
 
-      const index = new TextIndex({ baseFilename: baseName, order: 8 });
-      await index.open();
-
-      await index.add('doc1', 'The quick brown fox jumps over the lazy dog');
-      await index.add('doc2', 'Lazy dogs nap in the sun');
-      await index.add('doc3', 'A fast fox outruns every dog in the park');
-
-      log('=== Before Compaction ===');
-      const before = await index.query('fox dog', { scored: false });
-      log(`Query "fox dog": ${JSON.stringify(before)}`);
-
-      const result = await index.compact(compactBase);
-      log('\n=== Compaction Stats ===');
-      log(JSON.stringify(result, null, 2));
-
-      log('\n=== After Compaction ===');
-      const after = await index.query('fox dog', { scored: false });
-      log(`Query "fox dog": ${JSON.stringify(after)}`);
-
-      await index.add('doc4', 'Foxes and dogs share the trail');
-      const post = await index.query('fox', { scored: false });
-      log(`\nAfter adding doc4, query "fox": ${JSON.stringify(post)}`);
-
-      await index.close();
+      try {
+        log('Creating TextIndex with order=4...');
+        await callWorker('textindex-create', null, { baseName, order: 4 });
+        log('✓ TextIndex created');
+        
+        // Add sample documents
+        log('\nAdding documents...');
+        const documents = [
+          { id: 'doc1', text: 'The quick brown fox jumps over the lazy dog' },
+          { id: 'doc2', text: 'A fast brown fox leaps across the sleepy hound' },
+          { id: 'doc3', text: 'The lazy cat sleeps all day long' },
+          { id: 'doc4', text: 'Quick thinking helps solve complex problems' }
+        ];
+        
+        for (const doc of documents) {
+          await callWorker('textindex-add', null, { baseName, docId: doc.id, text: doc.text });
+          log(`  Added: ${doc.id}`);
+        }
+        
+        // Query before compaction
+        log('\nQuerying "quick fox" (before compaction)...');
+        const beforeResults = await callWorker('textindex-query', null, { 
+          baseName, 
+          queryText: 'quick fox',
+          options: { limit: 5 }
+        });
+        log(`Found ${beforeResults.length} results:`);
+        for (const result of beforeResults) {
+          log(`  ${result.id}: score=${result.score.toFixed(4)}`);
+        }
+        
+        // Show file sizes before compaction
+        log('\nFile sizes before compaction:');
+        const termsSize = await getFileSize(`${baseName}-terms.bjson`);
+        const docsSize = await getFileSize(`${baseName}-documents.bjson`);
+        const lengthsSize = await getFileSize(`${baseName}-lengths.bjson`);
+        const totalBefore = termsSize + docsSize + lengthsSize;
+        log(`  terms: ${termsSize} bytes`);
+        log(`  documents: ${docsSize} bytes`);
+        log(`  lengths: ${lengthsSize} bytes`);
+        log(`  TOTAL: ${totalBefore} bytes`);
+        
+        // Compact
+        log('\nCompacting...');
+        const stats = await callWorker('textindex-compact', null, { baseName, compactBaseName: compactBase });
+        log('✓ Compaction complete');
+        
+        // Show file sizes after compaction
+        log('\nFile sizes after compaction:');
+        const compactTermsSize = await getFileSize(`${compactBase}-terms.bjson`);
+        const compactDocsSize = await getFileSize(`${compactBase}-documents.bjson`);
+        const compactLengthsSize = await getFileSize(`${compactBase}-lengths.bjson`);
+        const totalAfter = compactTermsSize + compactDocsSize + compactLengthsSize;
+        log(`  terms: ${compactTermsSize} bytes`);
+        log(`  documents: ${compactDocsSize} bytes`);
+        log(`  lengths: ${compactLengthsSize} bytes`);
+        log(`  TOTAL: ${totalAfter} bytes`);
+        log(`  Reduction: ${totalBefore - totalAfter} bytes (${((1 - totalAfter / totalBefore) * 100).toFixed(1)}%)`);
+        
+        // Query after compaction
+        log('\nQuerying "quick fox" (after compaction)...');
+        const afterResults = await callWorker('textindex-query', null, { 
+          baseName: compactBase, 
+          queryText: 'quick fox',
+          options: { limit: 5 }
+        });
+        log(`Found ${afterResults.length} results:`);
+        for (const result of afterResults) {
+          log(`  ${result.id}: score=${result.score.toFixed(4)}`);
+        }
+        
+        // Verify results match
+        const scoresMatch = beforeResults.length === afterResults.length &&
+          beforeResults.every((r, i) => r.id === afterResults[i].id && 
+                                       Math.abs(r.score - afterResults[i].score) < 0.0001);
+        log(`\nResults match: ${scoresMatch ? '✓ YES' : '✗ NO'}`);
+        
+        log('\n✓ Demo complete!');
+      } catch (err) {
+        log(`Error: ${err.message || err}`);
+        console.error(err);
+      }
     }
 
     runBtn.addEventListener('click', () => runDemo().catch((err) => {

@@ -26,6 +26,34 @@
     const output = document.getElementById('output');
     const runBtn = document.getElementById('run');
 
+    // Initialize web worker for sync file operations
+    const worker = new Worker('/dist/worker.js');
+    let workerMessageId = 0;
+    const workerPromises = new Map();
+    
+    worker.addEventListener('message', (event) => {
+      const { id, result, error } = event.data;
+      const promise = workerPromises.get(id);
+      
+      if (promise) {
+        if (error) {
+          promise.reject(new Error(error));
+        } else {
+          promise.resolve(result);
+        }
+        workerPromises.delete(id);
+      }
+    });
+    
+    function callWorker(operation, filename, data) {
+      return new Promise((resolve, reject) => {
+        const id = ++workerMessageId;
+        workerPromises.set(id, { resolve, reject });
+        
+        worker.postMessage({ id, operation, filename, data });
+      });
+    }
+
     function log(line) {
       output.textContent += `${line}\n`;
     }
@@ -53,29 +81,34 @@
       await cleanup(filename);
       await cleanup(compacted);
 
-      const tree = new BPlusTree(filename, 4);
-      await tree.open();
-
-      await tree.add('alpha', { id: 1, label: 'first' });
-      await tree.add('beta', { id: 2, label: 'second' });
-      await tree.add('gamma', { id: 3, label: 'third' });
-
-      const before = await tree.toArray();
-      log('Original entries:');
-      log(JSON.stringify(before, null, 2));
-
-      const stats = await tree.compact(compacted);
-      log('Compaction stats:');
-      log(JSON.stringify(stats, null, 2));
-
-      await tree.close();
-
-      const newTree = new BPlusTree(compacted, 4);
-      await newTree.open();
-      const after = await newTree.toArray();
-      log('Compacted entries:');
-      log(JSON.stringify(after, null, 2));
-      await newTree.close();
+      try {
+        // Create tree and add entries
+        log('Creating B+ tree...');
+        await callWorker('bplustree-create', filename, { order: 4 });
+        
+        log('Adding entries...');
+        await callWorker('bplustree-add', filename, { key: 'alpha', value: { id: 1, label: 'first' } });
+        await callWorker('bplustree-add', filename, { key: 'beta', value: { id: 2, label: 'second' } });
+        await callWorker('bplustree-add', filename, { key: 'gamma', value: { id: 3, label: 'third' } });
+        
+        log('\n=== Before Compaction ===');
+        const before = await callWorker('bplustree-toArray', filename);
+        log(`Original entries (${before.length}):`);
+        log(JSON.stringify(before, null, 2));
+        
+        log('\n=== Compacting ===');
+        const stats = await callWorker('bplustree-compact', filename, { compactFilename: compacted });
+        log('Compaction stats:');
+        log(JSON.stringify(stats, null, 2));
+        
+        log('\n=== After Compaction ===');
+        const after = await callWorker('bplustree-toArray', compacted);
+        log(`Compacted entries (${after.length}):`);
+        log(JSON.stringify(after, null, 2));
+      } catch (err) {
+        log(`Error: ${err.message || err}`);
+        console.error(err);
+      }
     }
 
     runBtn.addEventListener('click', () => runDemo().catch((err) => {

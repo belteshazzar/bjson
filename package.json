@@ -21,7 +21,8 @@
     "test:coverage": "vitest --coverage",
     "test:browser": "vitest run --browser",
     "test:browser:ui": "vitest --browser --ui",
-    "serve": "http-server -c-1 ."
+    "build:worker": "rollup -c rollup.config.js",
+    "serve": "http-server -c-1 . -p 8080"
   },
   "keywords": [
     "binary",
@@ -36,12 +37,15 @@
   "author": "",
   "license": "BSD-2-Clause",
   "devDependencies": {
+    "@rollup/plugin-commonjs": "^28.0.2",
+    "@rollup/plugin-node-resolve": "^16.0.0",
     "@vitest/browser": "^3.2.4",
     "@vitest/coverage-v8": "^3.2.4",
     "@vitest/ui": "^3.2.4",
     "http-server": "^14.1.1",
     "node-opfs": "github:belteshazzar/node-opfs",
     "playwright": "^1.49.1",
+    "rollup": "^4.31.0",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   },

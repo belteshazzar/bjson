@@ -513,6 +513,32 @@ const record = decode(recordData);
 console.log(record); // { id: 2, name: 'Bob', email: 'bob@example.com' }
 ```
 
+## Browser Demos
+
+The `public/` directory contains interactive HTML demos that showcase OPFS integration. These demos use Web Workers with `FileSystemSyncAccessHandle` for efficient file operations.
+
+### Building
+
+The demos require a build step to bundle the worker with its dependencies (including the `stemmer` npm package):
+
+```bash
+npm run build:worker
+```
+
+This creates `dist/worker.js` which bundles all necessary dependencies.
+
+### Running Demos
+
+1. Build the worker: `npm run build:worker`
+2. Start the dev server: `npm run serve`
+3. Open http://localhost:8080/public/ in your browser (Chrome 102+ or Edge 102+ required for OPFS support)
+
+Available demos:
+- **bjson.html**: Basic encoding, file operations (write, read, append, scan, delete)
+- **bplustree-compact.html**: B+ tree index with compaction
+- **rtree-compact.html**: R-tree spatial index with geographic queries
+- **textindex-compact.html**: Full-text search index with BM25 ranking
+
 ## Testing
 
 Run the test suite:

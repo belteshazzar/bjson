@@ -107,13 +107,12 @@
   
   <div class="container">
     <div class="info">
-      <strong>Note:</strong> BJsonFile now uses FileSystemSyncAccessHandle which requires Web Worker context.<br>
-      The encoding/decoding features below work in the main thread, but file operations must be performed in a Web Worker.<br>
+      <strong>Note:</strong> File operations now use Web Workers for FileSystemSyncAccessHandle support.<br>
+      All file I/O is handled asynchronously in a dedicated worker thread.<br>
       Supported browsers include Chrome 102+, Edge 102+, and Opera 88+.
     </div>
     <div class="error" id="workerWarning" style="display: none;">
-      <strong>Warning:</strong> File operations will fail because FileSystemSyncAccessHandle is only available in Web Workers. 
-      Please see the BJsonFile documentation for examples of using it in a Web Worker context.
+      <strong>Warning:</strong> File operations are not working because Web Worker context is unavailable or an error occurred.
     </div>
   </div>
 
@@ -212,8 +211,41 @@ OBJECT:  0x11 (num keys as 32-bit uint + key-value pairs)
 
   <script type="module">
 
-    import { ObjectId, Pointer, encode, decode, BJsonFile } from '/src/bjson.js';
+    import { ObjectId, Pointer, encode, decode } from '/src/bjson.js';
     let currentBinary = null;
+    
+    // Initialize web worker for file operations
+    const worker = new Worker('/dist/worker.js');
+    let workerMessageId = 0;
+    const workerPromises = new Map();
+    
+    worker.addEventListener('message', (event) => {
+      const { id, result, error } = event.data;
+      const promise = workerPromises.get(id);
+      
+      if (promise) {
+        if (error) {
+          promise.reject(new Error(error));
+        } else {
+          promise.resolve(result);
+        }
+        workerPromises.delete(id);
+      }
+    });
+    
+    worker.addEventListener('error', (event) => {
+      console.error('Worker error:', event.message);
+      document.getElementById('workerWarning').style.display = 'block';
+    });
+    
+    function callWorker(operation, filename, data) {
+      return new Promise((resolve, reject) => {
+        const id = ++workerMessageId;
+        workerPromises.set(id, { resolve, reject });
+        
+        worker.postMessage({ id, operation, filename, data });
+      });
+    }
 
     // Parse extended JSON with ObjectId() and Date() constructors
     function parseExtendedJSON(jsonString) {
@@ -312,31 +344,18 @@ OBJECT:  0x11 (num keys as 32-bit uint + key-value pairs)
       }, 5000);
     }
 
-    function getFilename() {
-      return document.getElementById('filename').value || 'test.bjson';
-    }
-
     async function writeFile() {
-      // Show warning about web worker requirement
-      document.getElementById('workerWarning').style.display = 'block';
-      
       try {
+        const filename = document.getElementById('filename').value || 'demo.bjson';
         const jsonInput = document.getElementById('jsonInput').value;
         const data = parseExtendedJSON(jsonInput);
+        const binary = encode(data);
         
-        const file = new BJsonFile(getFilename());
-        await file.open('rw');
-        await file.write(data);
-        await file.close();
-        
-        showMessage('message', `Successfully wrote data to ${getFilename()}`);
+        await callWorker('write', filename, Array.from(binary));
+        showMessage('message', `Successfully wrote ${binary.length} bytes to ${filename}`);
         document.getElementById('output').textContent = 'Data written to file successfully!';
       } catch (error) {
-        if (error.message.includes('Web Worker')) {
-          showMessage('message', `File operations require Web Worker context. ${error.message}`, 'error');
-        } else {
-          showMessage('message', `Error: ${error.message}`, 'error');
-        }
+        showMessage('message', `Error: ${error.message}`, 'error');
         console.error(error);
       }
     }
@@ -344,23 +363,14 @@ OBJECT:  0x11 (num keys as 32-bit uint + key-value pairs)
     document.getElementById('writeFileBtn').addEventListener('click', writeFile);
 
     async function readFile() {
-      // Show warning about web worker requirement
-      document.getElementById('workerWarning').style.display = 'block';
-      
       try {
-        const file = new BJsonFile(getFilename());
-        await file.open('r');
-        const data = await file.read();
-        await file.close();
+        const filename = document.getElementById('filename').value || 'demo.bjson';
+        const data = await callWorker('read', filename);
         
-        showMessage('message', `Successfully read data from ${getFilename()}`);
-        document.getElementById('output').textContent = formatOutput(data);
+        showMessage('message', `Successfully read data from ${filename}`);
+        document.getElementById('output').textContent = JSON.stringify(data, null, 2);
       } catch (error) {
-        if (error.message.includes('Web Worker')) {
-          showMessage('message', `File operations require Web Worker context. ${error.message}`, 'error');
-        } else {
-          showMessage('message', `Error: ${error.message}`, 'error');
-        }
+        showMessage('message', `Error: ${error.message}`, 'error');
         console.error(error);
       }
     }
@@ -369,15 +379,13 @@ OBJECT:  0x11 (num keys as 32-bit uint + key-value pairs)
 
     async function appendToFile() {
       try {
+        const filename = document.getElementById('filename').value || 'demo.bjson';
         const jsonInput = document.getElementById('jsonInput').value;
         const data = parseExtendedJSON(jsonInput);
+        const binary = encode(data);
         
-        const file = new BJsonFile(getFilename());
-        await file.open('rw');
-        await file.append(data);
-        await file.close();
-        
-        showMessage('message', `Successfully appended data to ${getFilename()}`);
+        await callWorker('append', filename, Array.from(binary));
+        showMessage('message', `Successfully appended ${binary.length} bytes to ${filename}`);
         document.getElementById('output').textContent = 'Data appended to file successfully!';
       } catch (error) {
         showMessage('message', `Error: ${error.message}`, 'error');
@@ -389,18 +397,11 @@ OBJECT:  0x11 (num keys as 32-bit uint + key-value pairs)
 
     async function scanFile() {
       try {
-        const file = new BJsonFile(getFilename());
-        await file.open('r');
-        const records = [];
+        const filename = document.getElementById('filename').value || 'demo.bjson';
+        const records = await callWorker('scan', filename);
         
-        for (const record of file.scan()) {
-          records.push(record);
-        }
-        
-        await file.close();
-        
-        showMessage('message', `Successfully scanned ${records.length} record(s) from ${getFilename()}`);
-        document.getElementById('output').textContent = formatOutput(records);
+        showMessage('message', `Successfully scanned ${records.length} record(s) from ${filename}`);
+        document.getElementById('output').textContent = JSON.stringify(records, null, 2);
       } catch (error) {
         showMessage('message', `Error: ${error.message}`, 'error');
         console.error(error);
@@ -411,11 +412,10 @@ OBJECT:  0x11 (num keys as 32-bit uint + key-value pairs)
 
     async function deleteFile() {
       try {
-        const file = new BJsonFile(getFilename());
-        await file.open('rw');
-        await file.delete();
+        const filename = document.getElementById('filename').value || 'demo.bjson';
+        await callWorker('delete', filename);
         
-        showMessage('message', `Successfully deleted ${getFilename()}`);
+        showMessage('message', `Successfully deleted ${filename}`);
         document.getElementById('output').textContent = 'File deleted successfully!';
       } catch (error) {
         showMessage('message', `Error: ${error.message}`, 'error');
@@ -427,10 +427,10 @@ OBJECT:  0x11 (num keys as 32-bit uint + key-value pairs)
 
     async function checkFileExists() {
       try {
-        const file = new BJsonFile(getFilename());
-        const exists = await file.exists();
+        const filename = document.getElementById('filename').value || 'demo.bjson';
+        const exists = await callWorker('exists', filename);
         
-        showMessage('message', `File ${getFilename()} ${exists ? 'exists' : 'does not exist'}`);
+        showMessage('message', `File ${filename} ${exists ? 'exists' : 'does not exist'}`);
         document.getElementById('output').textContent = `File exists: ${exists}`;
       } catch (error) {
         showMessage('message', `Error: ${error.message}`, 'error');
