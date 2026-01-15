@@ -8,7 +8,7 @@
  *   await tree.close();
  */
 
-import { BJsonFile, Pointer } from './bjson.js';
+import { BJsonFile, Pointer, getFileHandle, deleteFile } from './bjson.js';
 
 /**
  * Node for persistent storage
@@ -56,7 +56,10 @@ export class BPlusTree {
         this.order = order;
         this.minKeys = Math.ceil(order / 2) - 1;
         
-        this.file = new BJsonFile(filename);
+        // OPFS handles
+        this.dirHandle = null;
+        this.fileHandle = null;
+        this.file = null;
         this.isOpen = false;
         
         // Metadata
@@ -73,13 +76,31 @@ export class BPlusTree {
             throw new Error('Tree file is already open');
         }
 
-        const exists = await this.file.exists();
+        // Get OPFS directory
+        if (!navigator.storage || !navigator.storage.getDirectory) {
+            throw new Error('Origin Private File System (OPFS) is not supported in this browser');
+        }
+        this.dirHandle = await navigator.storage.getDirectory();
+
+        // Check if file exists
+        let exists = false;
+        try {
+            this.fileHandle = await getFileHandle(this.dirHandle, this.filename);
+            exists = true;
+        } catch (error) {
+            if (error.name !== 'NotFoundError') {
+                throw error;
+            }
+        }
+
+        // Get or create file handle
+        this.fileHandle = await getFileHandle(this.dirHandle, this.filename, { create: true });
+        const syncHandle = await this.fileHandle.createSyncAccessHandle();
+        this.file = new BJsonFile(syncHandle);
 
         if (exists) {
-            await this.file.open('rw');
             this._loadMetadata();
         } else {
-            await this.file.open('rw');
             this._initializeNewTree();
         }
 
@@ -91,7 +112,13 @@ export class BPlusTree {
      */
     async close() {
         if (this.isOpen) {
-            await this.file.close();
+            if (this.file && this.file.syncAccessHandle) {
+                this.file.flush();
+                await this.file.syncAccessHandle.close();
+            }
+            this.file = null;
+            this.fileHandle = null;
+            this.dirHandle = null;
             this.isOpen = false;
         }
     }
@@ -546,7 +573,7 @@ export class BPlusTree {
         }
 
         // Make sure the current file has up-to-date metadata before measuring size
-        const oldSize = await this.file.getFileSize();
+        const oldSize = this.file.getFileSize();
 
         // Rebuild a fresh tree with only the live entries
         const entries = this.toArray();
@@ -558,10 +585,10 @@ export class BPlusTree {
         await newTree.close();
 
         // Measure new file size after metadata has been written on close
-        const tempFile = new BJsonFile(destinationFilename);
-        await tempFile.open('r');
-        const newSize = await tempFile.getFileSize();
-        await tempFile.close();
+        const destFileHandle = await getFileHandle(this.dirHandle, destinationFilename);
+        const destSyncHandle = await destFileHandle.createSyncAccessHandle();
+        const newSize = destSyncHandle.getSize();
+        await destSyncHandle.close();
 
         return {
             oldSize,

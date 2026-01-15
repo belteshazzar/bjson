@@ -1,6 +1,6 @@
-import { describe, it, beforeEach, afterEach, expect } from 'vitest';
+import { describe, it, beforeEach, afterEach, expect, beforeAll } from 'vitest';
 import { TextIndex } from '../src/textindex.js';
-import { BJsonFile } from '../src/bjson.js';
+import { deleteFile, getFileHandle } from '../src/bjson.js';
 
 let hasOPFS = false;
 try {
@@ -23,6 +23,13 @@ describe.skipIf(!hasOPFS)('TextIndex', function() {
   let index;
   let baseName;
   let counter = 0;
+  let rootDirHandle = null;
+
+  beforeAll(async () => {
+    if (navigator.storage && navigator.storage.getDirectory) {
+      rootDirHandle = await navigator.storage.getDirectory();
+    }
+  });
 
   const getIds = (results) => {
     if (results.length === 0) return [];
@@ -38,11 +45,9 @@ describe.skipIf(!hasOPFS)('TextIndex', function() {
     ];
 
     for (const file of files) {
-        const handle = new BJsonFile(file);
-        if (await handle.exists()) {
-          await handle.delete();
+        if (rootDirHandle) {
+          await deleteFile(rootDirHandle, file);
         }
-
     }
   }
 

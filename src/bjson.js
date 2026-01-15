@@ -554,104 +554,22 @@ function decode(data) {
 /**
  * OPFS File Operations using FileSystemSyncAccessHandle
  * 
- * IMPORTANT: This class uses FileSystemSyncAccessHandle which is only available
+ * IMPORTANT: This class wraps FileSystemSyncAccessHandle which is only available
  * in Web Workers. It provides synchronous file operations with explicit flush control.
  */
 class BJsonFile {
-  constructor(filename) {
-    this.filename = filename;
-    this.root = null;
-    this.fileHandle = null;
-    this.syncAccessHandle = null;
-    this.mode = null; // 'r' for read-only, 'rw' for read-write
-    this.isOpen = false;
+  constructor(syncAccessHandle) {
+    if (!syncAccessHandle) {
+      throw new Error('FileSystemSyncAccessHandle is required');
+    }
+    this.syncAccessHandle = syncAccessHandle;
   }
 
-  /**
-   * Open the file with specified mode
-   * Note: This must be called from a Web Worker as it uses FileSystemSyncAccessHandle
-   * @param {string} mode - 'r' for read-only, 'rw' for read-write
-   */
-  async open(mode = 'r') {
-    if (this.isOpen) {
-      throw new Error(`File is already open in ${this.mode} mode`);
-    }
-
-    if (mode !== 'r' && mode !== 'rw') {
-      throw new Error(`Invalid mode: ${mode}. Use 'r' for read-only or 'rw' for read-write`);
-    }
-
-    if (!navigator.storage || !navigator.storage.getDirectory) {
-      throw new Error('Origin Private File System (OPFS) is not supported in this browser');
-    }
-
-    this.root = this.root || await navigator.storage.getDirectory();
-    this.mode = mode;
-
-    try {
-      // For read mode, file must exist
-      if (mode === 'r') {
-        this.fileHandle = await this.root.getFileHandle(this.filename);
-      } else {
-        // For read-write mode, create if doesn't exist
-        this.fileHandle = await this.root.getFileHandle(this.filename, { create: true });
-      }
-      
-      // Create sync access handle - only works in Web Workers
-      this.syncAccessHandle = await this.fileHandle.createSyncAccessHandle();
-      this.isOpen = true;
-    } catch (error) {
-      if (error.name === 'NotFoundError') {
-        throw new Error(`File not found: ${this.filename}`);
-      }
-      if (error.name === 'NoModificationAllowedError' || error.message?.includes('createSyncAccessHandle')) {
-        throw new Error('FileSystemSyncAccessHandle is only available in Web Workers. BJsonFile must be used in a Web Worker context.');
-      }
-      throw error;
-    }
-  }
-
-  /**
-   * Close the file and flush any pending writes
-   */
-  async close() {
-    if (this.syncAccessHandle) {
-      // Flush any pending writes before closing
-      this.syncAccessHandle.flush();
-      
-      await this.syncAccessHandle.close();
-      
-      this.syncAccessHandle = null;
-    }
-    this.isOpen = false;
-    this.mode = null;
-    this.fileHandle = null;
-  }
-
-  /**
-   * Ensure file is open, throw if not
-   */
-  ensureOpen() {
-    if (!this.isOpen) {
-      throw new Error(`File is not open. Call open('r') or open('rw') first`);
-    }
-  }
-
-  /**
-   * Ensure file is writable, throw if read-only
-   */
-  ensureWritable() {
-    this.ensureOpen();
-    if (this.mode === 'r') {
-      throw new Error(`File is opened in read-only mode. Cannot write or append`);
-    }
-  }
 
   /**
    * Read a range of bytes from the file
    */
   #readRange(start, length) {
-    this.ensureOpen();
     const buffer = new Uint8Array(length);
     const bytesRead = this.syncAccessHandle.read(buffer, { at: start });
     if (bytesRead < length) {
@@ -665,7 +583,6 @@ class BJsonFile {
    * Get the current file size
    */
   getFileSize() {
-    this.ensureOpen();
     return this.syncAccessHandle.getSize();
   }
 
@@ -674,8 +591,6 @@ class BJsonFile {
    * @param {*} data - Data to encode and write
    */
   write(data) {
-    this.ensureWritable();
-    
     // Encode data to binary
     const binaryData = encode(data);
     
@@ -692,12 +607,10 @@ class BJsonFile {
    * @returns {*} - Decoded data
    */
   read(pointer = new Pointer(0)) {
-    this.ensureOpen();
-    
     const fileSize = this.getFileSize();
     
     if (fileSize === 0) {
-      throw new Error(`File is empty: ${this.filename}`);
+      throw new Error('File is empty');
     }
 
     const pointerValue = pointer.valueOf();
@@ -719,8 +632,6 @@ class BJsonFile {
    * @param {*} data - Data to encode and append
    */
   append(data) {
-    this.ensureWritable();
-    
     // Encode new data to binary
     const binaryData = encode(data);
     
@@ -735,17 +646,14 @@ class BJsonFile {
    * Explicitly flush any pending writes to disk
    */
   flush() {
-    this.ensureWritable();
     this.syncAccessHandle.flush();
   }
 
   /**
-   * Async generator to scan through all records in the file
+   * Generator to scan through all records in the file
    * Each record is decoded and yielded one at a time
    */
   *scan() {
-    this.ensureOpen();
-    
     const fileSize = this.getFileSize();
       
       if (fileSize === 0) {
@@ -826,42 +734,48 @@ class BJsonFile {
         yield decode(valueData);
       }
   }
+}
 
-  async delete() {
-    if (this.isOpen) {
-      throw new Error(`File is open. Call close() first`);
-    }
-    
-    this.root = this.root || await navigator.storage.getDirectory();
-
-    try {
-      await this.root.removeEntry(this.filename);
-    } catch (error) {
-      if (error.name === 'NotFoundError') {
-        // File doesn't exist, nothing to delete
-        return;
-      }
-      throw error;
-    }
+/**
+ * Check if a file exists in OPFS
+ * @param {FileSystemFileHandle} fileHandle - The file handle to check
+ * @returns {boolean} - True if file exists and is readable
+ */
+function exists(fileHandle) {
+  try {
+    // If we have a handle, the file exists
+    return fileHandle !== null && fileHandle !== undefined;
+  } catch {
+    return false;
   }
+}
 
-  async exists() {
-    if (!navigator.storage || !navigator.storage.getDirectory) {
-      throw new Error('Origin Private File System (OPFS) is not supported in this browser');
+/**
+ * Delete a file from OPFS
+ * @param {FileSystemDirectoryHandle} dirHandle - The directory handle
+ * @param {string} filename - Name of the file to delete
+ */
+async function deleteFile(dirHandle, filename) {
+  try {
+    await dirHandle.removeEntry(filename);
+  } catch (error) {
+    if (error.name === 'NotFoundError') {
+      // File doesn't exist, nothing to delete
+      return;
     }
-    
-    this.root = this.root || await navigator.storage.getDirectory();
-
-    try {
-      await this.root.getFileHandle(this.filename);
-      return true;
-    } catch (error) {
-      if (error.name === 'NotFoundError') {
-        return false;
-      }
-      throw error;
-    }
+    throw error;
   }
+}
+
+/**
+ * Get or create a file handle from a directory
+ * @param {FileSystemDirectoryHandle} dirHandle - The directory handle
+ * @param {string} filename - Name of the file
+ * @param {Object} options - Options for getFileHandle
+ * @returns {FileSystemFileHandle} - The file handle
+ */
+async function getFileHandle(dirHandle, filename, options = {}) {
+  return dirHandle.getFileHandle(filename, options);
 }
 
 export {
@@ -870,5 +784,8 @@ export {
   Pointer,
   encode,
   decode,
-  BJsonFile
+  BJsonFile,
+  exists,
+  deleteFile,
+  getFileHandle
 };

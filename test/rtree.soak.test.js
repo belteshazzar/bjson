@@ -5,15 +5,17 @@
  * Note: These tests are designed to work within the current RTree architecture
  * and focus on measuring timing and performance under load.
  */
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeAll } from 'vitest';
 import { RTree } from '../src/rtree.js';
-import { BJsonFile, ObjectId } from '../src/bjson.js';
+import { deleteFile, getFileHandle, ObjectId } from '../src/bjson.js';
 
 // Detect if running in browser
 const isBrowser = typeof navigator !== 'undefined' && typeof process === 'undefined';
 
 // Set up node-opfs for Node.js environment
 let hasOPFS = false;
+let rootDirHandle = null;
+
 try {
   const nodeOpfs = await import('node-opfs');
   if (nodeOpfs.navigator && typeof global !== 'undefined') {
@@ -30,10 +32,17 @@ try {
   }
 }
 
+if (hasOPFS) {
+  beforeAll(async () => {
+    if (navigator.storage && navigator.storage.getDirectory) {
+      rootDirHandle = await navigator.storage.getDirectory();
+    }
+  });
+}
+
 async function cleanup() {
-    const file = new BJsonFile('test-rtree-soak.bjson');
-    if (await file.exists()) {
-      await file.delete();
+    if (rootDirHandle) {
+      await deleteFile(rootDirHandle, 'test-rtree-soak.bjson');
     }
 }
 

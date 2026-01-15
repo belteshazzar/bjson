@@ -45,8 +45,8 @@ console.log(`Loaded ${allDocs.length} documents into array in ${arrayEndTime - a
 await tree.close();
 
 // Clean up
-const { BJsonFile } = await import('./src/bjson.js');
-const file = new BJsonFile('example-iterator.bjson');
-await file.delete();
+const { deleteFile } = await import('./src/bjson.js');
+const dirHandle = await navigator.storage.getDirectory();
+await deleteFile(dirHandle, 'example-iterator.bjson');
 
 console.log('\nDone!');

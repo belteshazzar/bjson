@@ -16,7 +16,7 @@
  * - Final record: Metadata {version, snapshotPointer, latestPointer, diffCount, diffsPerSnapshot}
  */
 
-import { BJsonFile, Pointer } from './bjson.js';
+import { BJsonFile, Pointer, getFileHandle, deleteFile } from './bjson.js';
 import { createPatch, applyPatch, structuredPatch } from 'diff';
 import { createHash } from 'crypto';
 
@@ -43,8 +43,10 @@ export class TextLog {
     this.filename = filename;
     this.diffsPerSnapshot = diffsPerSnapshot;
     
-    // BJsonFile handle
-    this.file = new BJsonFile(filename);
+    // OPFS handles
+    this.dirHandle = null;
+    this.fileHandle = null;
+    this.file = null;
     this.isOpen = false;
     
     // Metadata
@@ -62,15 +64,33 @@ export class TextLog {
       throw new Error('TextLog file is already open');
     }
     
-    const exists = await this.file.exists();
+    // Get OPFS directory
+    if (!navigator.storage || !navigator.storage.getDirectory) {
+      throw new Error('Origin Private File System (OPFS) is not supported in this browser');
+    }
+    this.dirHandle = await navigator.storage.getDirectory();
+
+    // Check if file exists
+    let exists = false;
+    try {
+      this.fileHandle = await getFileHandle(this.dirHandle, this.filename);
+      exists = true;
+    } catch (error) {
+      if (error.name !== 'NotFoundError') {
+        throw error;
+      }
+    }
+
+    // Get or create file handle
+    this.fileHandle = await getFileHandle(this.dirHandle, this.filename, { create: true });
+    const syncHandle = await this.fileHandle.createSyncAccessHandle();
+    this.file = new BJsonFile(syncHandle);
     
     if (exists) {
       // Load existing log
-      await this.file.open('rw');
       await this._loadMetadata();
     } else {
       // Create new log
-      await this.file.open('rw');
       await this._initializeNewLog();
     }
     
@@ -83,7 +103,13 @@ export class TextLog {
   async close() {
     if (this.isOpen) {
       await this._writeMetadata();
-      await this.file.close();
+      if (this.file && this.file.syncAccessHandle) {
+        this.file.flush();
+        await this.file.syncAccessHandle.close();
+      }
+      this.file = null;
+      this.fileHandle = null;
+      this.dirHandle = null;
       this.isOpen = false;
     }
   }

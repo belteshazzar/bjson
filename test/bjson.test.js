@@ -2,10 +2,12 @@
  * Test suite for bjson encoder/decoder
  */
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
-import { TYPE, ObjectId, Pointer, encode, decode, BJsonFile } from '../src/bjson.js';
+import { TYPE, ObjectId, Pointer, encode, decode, BJsonFile, deleteFile, getFileHandle } from '../src/bjson.js';
 
 // Set up node-opfs for Node.js environment
 let hasOPFS = false;
+let rootDirHandle = null;
+
 try {
   // Try to use node-opfs if running in Node.js
   const nodeOpfs = await import('node-opfs');
@@ -23,6 +25,15 @@ try {
   if (typeof navigator !== 'undefined' && navigator.storage && navigator.storage.getDirectory) {
     hasOPFS = true;
   }
+}
+
+// Initialize OPFS root directory handle if available
+if (hasOPFS) {
+  beforeAll(async () => {
+    if (navigator.storage && navigator.storage.getDirectory) {
+      rootDirHandle = await navigator.storage.getDirectory();
+    }
+  });
 }
 
 describe('Binary JSON Encoder/Decoder', () => {
@@ -435,17 +446,17 @@ describe.skipIf(!hasOPFS)('BJsonFile', () => {
 
   afterEach(async () => {
     // Clean up test files
-    for (const filename of testFiles) {
-        const file = new BJsonFile(filename);
-        if (await file.exists()) {
-          await file.delete();
-        }
+    if (rootDirHandle) {
+      for (const filename of testFiles) {
+        await deleteFile(rootDirHandle, filename);
+      }
     }
   });
 
   it('should write and read file', async () => {
-    const file = new BJsonFile('test-bjsonfile.bjson');
-    await file.open('rw');
+    const fileHandle = await getFileHandle(rootDirHandle, 'test-bjsonfile.bjson', { create: true });
+    const syncHandle = await fileHandle.createSyncAccessHandle();
+    const file = new BJsonFile(syncHandle);
 
     const data = {
       name: 'Test Document',
@@ -460,11 +471,9 @@ describe.skipIf(!hasOPFS)('BJsonFile', () => {
     };
 
     file.write(data);
-    await file.close();
+    file.flush();
 
-    await file.open('r');
     const readData = file.read();
-    await file.close();
 
     expect(readData.name).toBe('Test Document');
     expect(readData.count).toBe(42);
@@ -472,63 +481,73 @@ describe.skipIf(!hasOPFS)('BJsonFile', () => {
     expect(readData.active).toBe(true);
     expect(readData.tags).toHaveLength(3);
     expect(readData.metadata.updated).toBe(null);
+
+    await syncHandle.close();
   });
 
   it('should check file existence', async () => {
-    const file = new BJsonFile('test-bjsonfile.bjson');
-    await file.open('rw');
+    const fileHandle = await getFileHandle(rootDirHandle, 'test-bjsonfile.bjson', { create: true });
+    const syncHandle = await fileHandle.createSyncAccessHandle();
+    const file = new BJsonFile(syncHandle);
+    
     file.write({ test: 'data' });
-    await file.close();
+    file.flush();
 
-    expect(await file.exists()).toBe(true);
+    expect(fileHandle).toBeDefined();
 
-    const nonExistent = new BJsonFile('nonexistent.bjson');
-    expect(await nonExistent.exists()).toBe(false);
+    try {
+      await getFileHandle(rootDirHandle, 'nonexistent.bjson');
+      expect(true).toBe(false); // Should not reach here
+    } catch (error) {
+      expect(error.name).toBe('NotFoundError');
+    }
+
+    await syncHandle.close();
   });
 
   it('should append and scan records', async () => {
-    const file = new BJsonFile('test-bjsonfile2.bjson');
+    const fileHandle = await getFileHandle(rootDirHandle, 'test-bjsonfile2.bjson', { create: true });
+    const syncHandle = await fileHandle.createSyncAccessHandle();
+    const file = new BJsonFile(syncHandle);
     
     // Write first record
-    await file.open('rw');
     file.write({ id: 1, name: 'First' });
-    await file.close();
+    file.flush();
 
     // Append second record
-    await file.open('rw');
     file.append({ id: 2, name: 'Second' });
-    await file.close();
+    file.flush();
 
     // Scan records
-    await file.open('r');
     const records = [];
     for (const record of file.scan()) {
       records.push(record);
     }
-    await file.close();
 
     expect(records).toHaveLength(2);
     expect(records[0].id).toBe(1);
     expect(records[1].id).toBe(2);
-  });
 
-  it('should enforce read-only mode', async () => {
-    const file = new BJsonFile('test-bjsonfile.bjson');
-    await file.open('rw');
-    file.write({ test: 'data' });
-    await file.close();
-
-    await file.open('r');
-    expect(() => file.ensureWritable()).toThrow();
-    await file.close();
+    await syncHandle.close();
   });
 
   it('should delete file', async () => {
-    const file = new BJsonFile('test-bjsonfile.bjson');
-    await file.open('rw');
+    const fileHandle = await getFileHandle(rootDirHandle, 'test-bjsonfile.bjson', { create: true });
+    const syncHandle = await fileHandle.createSyncAccessHandle();
+    const file = new BJsonFile(syncHandle);
+    
     file.write({ test: 'data' });
-    await file.close();
-    await file.delete();
-    expect(await file.exists()).toBe(false);
+    file.flush();
+    
+    await syncHandle.close();
+    await deleteFile(rootDirHandle, 'test-bjsonfile.bjson');
+
+    // Verify file is deleted
+    try {
+      await getFileHandle(rootDirHandle, 'test-bjsonfile.bjson');
+      expect(true).toBe(false); // Should not reach here
+    } catch (error) {
+      expect(error.name).toBe('NotFoundError');
+    }
   });
 });

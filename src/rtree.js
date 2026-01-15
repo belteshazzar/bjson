@@ -14,7 +14,7 @@
  *   - For leaf nodes: children are data entries with {bbox, lat, lng, data}
  */
 
-import { BJsonFile, Pointer, ObjectId } from './bjson.js';
+import { BJsonFile, Pointer, ObjectId, getFileHandle, deleteFile } from './bjson.js';
 
 /**
  * Calculate distance between two points using Haversine formula
@@ -158,8 +158,10 @@ export class RTree {
 		this.nextId = 1;
 		this._size = 0;
 		
-		// BJsonFile handle
-		this.file = new BJsonFile(filename);
+		// OPFS handles
+		this.dirHandle = null;
+		this.fileHandle = null;
+		this.file = null;
 		this.isOpen = false;
 	}
 
@@ -171,15 +173,33 @@ export class RTree {
 			throw new Error('R-tree file is already open');
 		}
 
-		const exists = await this.file.exists();
-		
+		// Get OPFS directory
+		if (!navigator.storage || !navigator.storage.getDirectory) {
+			throw new Error('Origin Private File System (OPFS) is not supported in this browser');
+		}
+		this.dirHandle = await navigator.storage.getDirectory();
+
+		// Check if file exists
+		let exists = false;
+		try {
+			this.fileHandle = await getFileHandle(this.dirHandle, this.filename);
+			exists = true;
+		} catch (error) {
+			if (error.name !== 'NotFoundError') {
+				throw error;
+			}
+		}
+
+		// Get or create file handle
+		this.fileHandle = await getFileHandle(this.dirHandle, this.filename, { create: true });
+		const syncHandle = await this.fileHandle.createSyncAccessHandle();
+		this.file = new BJsonFile(syncHandle);
+
 		if (exists) {
 			// Load existing tree
-			await this.file.open('rw');
 			this._loadFromFile();
 		} else {
 			// Create new tree
-			await this.file.open('rw');
 			this._initializeNewTree();
 		}
 		
@@ -192,7 +212,13 @@ export class RTree {
 	async close() {
 		if (this.isOpen) {
 			this._writeMetadata();
-			await this.file.close();
+			if (this.file && this.file.syncAccessHandle) {
+				this.file.flush();
+				await this.file.syncAccessHandle.close();
+			}
+			this.file = null;
+			this.fileHandle = null;
+			this.dirHandle = null;
 			this.isOpen = false;
 		}
 	}
@@ -874,99 +900,99 @@ export class RTree {
 	/**
 	 * Clear all entries from the tree
 	 */
-  // TODO: This method deletes and recreates the underlying file to clear all data.
-  // immutable????
 	async clear() {
 		await this.close();
 		
-		// Delete and recreate file
-		const tempFile = new BJsonFile(this.filename);
-		await tempFile.delete();
+		// Delete file
+		await deleteFile(this.dirHandle || await navigator.storage.getDirectory(), this.filename);
 		
 		// Reinitialize
-		this.file = new BJsonFile(this.filename);
+		this.dirHandle = null;
+		this.fileHandle = null;
+		this.file = null;
+		this.isOpen = false;
 		await this.open();
 	}
 
-		/**
-		 * Compact the R-tree by copying the current root and all reachable nodes into a new file.
-		 * Returns size metrics to show reclaimed space.
-		 * @param {string} destinationFilename
-		 */
-		async compact(destinationFilename) {
-			if (!this.isOpen) {
-				throw new Error('R-tree file must be opened before use');
-			}
-			if (!destinationFilename) {
-				throw new Error('Destination filename is required for compaction');
-			}
-
-			// Flush current metadata so size reflects latest state
-			this._writeMetadata();
-			const oldSize = this.file.getFileSize();
-
-			const dest = new RTree(destinationFilename, this.maxEntries);
-			dest.minEntries = this.minEntries;
-			dest.nextId = this.nextId;
-			dest._size = this._size;
-
-			await dest.file.open('rw');
-			dest.isOpen = true;
-
-			const pointerMap = new Map();
-
-			const cloneNode = (pointer) => {
-				const offset = pointer.valueOf();
-				if (pointerMap.has(offset)) {
-					return pointerMap.get(offset);
-				}
-
-				const sourceNode = this._loadNode(pointer);
-				const clonedChildren = [];
-
-				if (sourceNode.isLeaf) {
-					// Leaf children are plain entries
-					for (const child of sourceNode.children) {
-						clonedChildren.push(child);
-					}
-				} else {
-					for (const childPointer of sourceNode.children) {
-						const newChildPtr = cloneNode(childPointer);
-						clonedChildren.push(newChildPtr);
-					}
-				}
-
-				const clonedNode = new RTreeNode(dest, {
-					id: sourceNode.id,
-					isLeaf: sourceNode.isLeaf,
-					children: clonedChildren,
-					bbox: sourceNode.bbox
-				});
-
-				const newPointer = dest._saveNode(clonedNode);
-				pointerMap.set(offset, newPointer);
-				return newPointer;
-			};
-
-			const newRootPointer = cloneNode(this.rootPointer);
-			dest.rootPointer = newRootPointer;
-
-			dest._writeMetadata();
-			await dest.file.close();
-			dest.isOpen = false;
-
-			const tempFile = new BJsonFile(destinationFilename);
-			await tempFile.open('r');
-			const newSize = tempFile.getFileSize();
-			await tempFile.close();
-
-			return {
-				oldSize,
-				newSize,
-				bytesSaved: Math.max(0, oldSize - newSize),
-				newFilename: destinationFilename
-			};
+	/**
+	 * Compact the R-tree by copying the current root and all reachable nodes into a new file.
+	 * Returns size metrics to show reclaimed space.
+	 * @param {string} destinationFilename
+	 */
+	async compact(destinationFilename) {
+		if (!this.isOpen) {
+			throw new Error('R-tree file must be opened before use');
 		}
+		if (!destinationFilename) {
+			throw new Error('Destination filename is required for compaction');
+		}
+
+		// Flush current metadata so size reflects latest state
+		this._writeMetadata();
+		const oldSize = this.file.getFileSize();
+
+		const dest = new RTree(destinationFilename, this.maxEntries);
+		await dest.open();
+		
+		// After opening, set the properties we want to preserve
+		dest.minEntries = this.minEntries;
+		dest.nextId = this.nextId;
+		dest._size = this._size;
+
+		const pointerMap = new Map();
+
+		const cloneNode = (pointer) => {
+			const offset = pointer.valueOf();
+			if (pointerMap.has(offset)) {
+				return pointerMap.get(offset);
+			}
+
+			const sourceNode = this._loadNode(pointer);
+			const clonedChildren = [];
+
+			if (sourceNode.isLeaf) {
+				// Leaf children are plain entries
+				for (const child of sourceNode.children) {
+					clonedChildren.push(child);
+				}
+			} else {
+				for (const childPointer of sourceNode.children) {
+					const newChildPtr = cloneNode(childPointer);
+					clonedChildren.push(newChildPtr);
+				}
+			}
+
+			const clonedNode = new RTreeNode(dest, {
+				id: sourceNode.id,
+				isLeaf: sourceNode.isLeaf,
+				children: clonedChildren,
+				bbox: sourceNode.bbox
+			});
+
+			const newPointer = dest._saveNode(clonedNode);
+			pointerMap.set(offset, newPointer);
+			return newPointer;
+		};
+
+		const newRootPointer = cloneNode(this.rootPointer);
+		dest.rootPointer = newRootPointer;
+
+		dest._writeMetadata();
+		await dest.close();
+
+		// Get size of destination file
+		const destFileHandle = await getFileHandle(this.dirHandle, destinationFilename);
+		const destSyncHandle = await destFileHandle.createSyncAccessHandle();
+		const newSize = destSyncHandle.getSize();
+		await destSyncHandle.close();
+
+		return {
+			oldSize,
+			newSize,
+			bytesSaved: Math.max(0, oldSize - newSize),
+			newFilename: destinationFilename
+		};
+	}
 }
 
 export default RTree;

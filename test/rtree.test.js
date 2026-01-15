@@ -3,10 +3,12 @@
  */
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import { RTree } from '../src/rtree.js';
-import { BJsonFile, ObjectId } from '../src/bjson.js';
+import { ObjectId, deleteFile, getFileHandle } from '../src/bjson.js';
 
 // Set up node-opfs for Node.js environment
 let hasOPFS = false;
+let rootDirHandle = null;
+
 try {
   // Try to use node-opfs if running in Node.js
   const nodeOpfs = await import('node-opfs');
@@ -26,10 +28,18 @@ try {
   }
 }
 
+// Initialize OPFS root directory handle if available
+if (hasOPFS) {
+  beforeAll(async () => {
+    if (navigator.storage && navigator.storage.getDirectory) {
+      rootDirHandle = await navigator.storage.getDirectory();
+    }
+  });
+}
+
 async function cleanup() {
-    const file = new BJsonFile('test-rtree.bjson');
-    if (await file.exists()) {
-      await file.delete();
+    if (rootDirHandle) {
+      await deleteFile(rootDirHandle, 'test-rtree.bjson');
     }
 }
 

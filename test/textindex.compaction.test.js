@@ -1,6 +1,6 @@
-import { describe, it, beforeEach, afterEach, expect } from 'vitest';
+import { describe, it, beforeEach, afterEach, expect, beforeAll } from 'vitest';
 import { TextIndex } from '../src/textindex.js';
-import { BJsonFile } from '../src/bjson.js';
+import { deleteFile, getFileHandle } from '../src/bjson.js';
 
 let hasOPFS = false;
 try {
@@ -24,6 +24,13 @@ describe.skipIf(!hasOPFS)('TextIndex compaction', function() {
   let baseName;
   let compactBase;
   let counter = 0;
+  let rootDirHandle = null;
+
+  beforeAll(async () => {
+    if (navigator.storage && navigator.storage.getDirectory) {
+      rootDirHandle = await navigator.storage.getDirectory();
+    }
+  });
 
   async function cleanupFiles(name) {
     if (!name) return;
@@ -34,9 +41,8 @@ describe.skipIf(!hasOPFS)('TextIndex compaction', function() {
     ];
 
     for (const file of files) {
-        const handle = new BJsonFile(file);
-        if (await handle.exists()) {
-          await handle.delete();
+        if (rootDirHandle) {
+          await deleteFile(rootDirHandle, file);
         }
     }
   }

@@ -1,6 +1,6 @@
-import { describe, it, beforeEach, afterEach, expect } from 'vitest';
+import { describe, it, beforeEach, afterEach, expect, beforeAll } from 'vitest';
 import { RTree } from '../src/rtree.js';
-import { BJsonFile, ObjectId } from '../src/bjson.js';
+import { deleteFile, getFileHandle, ObjectId } from '../src/bjson.js';
 
 // Set up node-opfs for Node.js environment
 let hasOPFS = false;
@@ -22,15 +22,21 @@ try {
 
 describe.skipIf(!hasOPFS)('R-tree Compaction', function() {
   let testFileCounter = 0;
+  let rootDirHandle = null;
+
+  beforeAll(async () => {
+    if (navigator.storage && navigator.storage.getDirectory) {
+      rootDirHandle = await navigator.storage.getDirectory();
+    }
+  });
 
   function getTestFilename() {
     return `test-rtree-${Date.now()}-${testFileCounter++}.bjson`;
   }
 
   async function cleanupFile(filename) {
-      const file = new BJsonFile(filename);
-      if (await file.exists()) {
-        await file.delete();
+      if (rootDirHandle) {
+        await deleteFile(rootDirHandle, filename);
       }
   }
 

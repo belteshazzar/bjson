@@ -1,9 +1,9 @@
 /**
  * Test suite for TextLog implementation
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, beforeAll } from 'vitest';
 import { TextLog, ENTRY_TYPE } from '../src/textlog.js';
-import { BJsonFile } from '../src/bjson.js';
+import { deleteFile, getFileHandle } from '../src/bjson.js';
 
 // Set up node-opfs for Node.js environment
 let hasOPFS = false;
@@ -28,15 +28,21 @@ try {
 
 describe.skipIf(!hasOPFS)('TextLog', function() {
   let testFileCounter = 0;
+  let rootDirHandle = null;
+
+  beforeAll(async () => {
+    if (navigator.storage && navigator.storage.getDirectory) {
+      rootDirHandle = await navigator.storage.getDirectory();
+    }
+  });
 
   function getTestFilename() {
     return `test-textlog-${Date.now()}-${testFileCounter++}.bjson`;
   }
 
   async function cleanupFile(filename) {
-      const file = new BJsonFile(filename);
-      if (await file.exists()) {
-        await file.delete();
+      if (rootDirHandle) {
+        await deleteFile(rootDirHandle, filename);
       }
   }
 

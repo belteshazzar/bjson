@@ -2,12 +2,14 @@
  * Persistence tests for BPlusTree
  * Tests that data survives close/reopen cycles
  */
-import { expect, describe, it, afterEach } from 'vitest';
+import { expect, describe, it, afterEach, beforeAll } from 'vitest';
 import { BPlusTree } from '../src/bplustree.js';
-import { BJsonFile } from '../src/bjson.js';
+import { deleteFile, getFileHandle } from '../src/bjson.js';
 
 // Set up node-opfs for Node.js environment
 let hasOPFS = false;
+let rootDirHandle = null;
+
 try {
   const nodeOpfs = await import('node-opfs');
   if (nodeOpfs.navigator && typeof global !== 'undefined') {
@@ -24,10 +26,18 @@ try {
   }
 }
 
+// Initialize OPFS root directory handle if available
+if (hasOPFS) {
+  beforeAll(async () => {
+    if (navigator.storage && navigator.storage.getDirectory) {
+      rootDirHandle = await navigator.storage.getDirectory();
+    }
+  });
+}
+
 async function cleanupFile(filename) {
-    const file = new BJsonFile(filename);
-    if (await file.exists()) {
-      await file.delete();
+    if (rootDirHandle) {
+      await deleteFile(rootDirHandle, filename);
     }
 }
 
