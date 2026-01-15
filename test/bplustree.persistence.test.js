@@ -35,6 +35,29 @@ if (hasOPFS) {
   });
 }
 
+let testFileCounter = 0;
+
+function getTestFilename() {
+  return `test-bplustree-persistence-${Date.now()}-${testFileCounter++}.bjson`;
+}
+
+async function createTestTree(order = 3) {
+  const filename = getTestFilename();
+  const fileHandle = await getFileHandle(rootDirHandle, filename, { create: true });
+  const syncHandle = await fileHandle.createSyncAccessHandle();
+  const tree = new BPlusTree(syncHandle, order, rootDirHandle);
+  tree._testFilename = filename;
+  return tree;
+}
+
+async function reopenTree(filename, order = 3) {
+  const fileHandle = await getFileHandle(rootDirHandle, filename, { create: false });
+  const syncHandle = await fileHandle.createSyncAccessHandle();
+  const tree = new BPlusTree(syncHandle, order, rootDirHandle);
+  tree._testFilename = filename;
+  return tree;
+}
+
 async function cleanupFile(filename) {
     if (rootDirHandle) {
       await deleteFile(rootDirHandle, filename);
@@ -42,30 +65,31 @@ async function cleanupFile(filename) {
 }
 
 describe.skipIf(!hasOPFS)('BPlusTree Persistence', () => {
-  const filename = 'test-bplustree-persistence.bjson';
 
   afterEach(async () => {
-    await cleanupFile(filename);
+    // Cleanup happens within each test
   });
 
   it('should persist and reload a single key-value pair', async () => {
     // Create and populate tree
-    let tree = new BPlusTree(filename, 3);
+    let tree = await createTestTree(3);
+    const filename = tree._testFilename;
     await tree.open();
     
-    tree.add(10, 'ten');
+    await tree.add(10, 'ten');
     expect(tree.size()).toBe(1);
     
     await tree.close();
 
     // Reopen and verify
-    tree = new BPlusTree(filename, 3);
+    tree = await reopenTree(filename, 3);
     await tree.open();
     
     expect(tree.size()).toBe(1);
-    expect(tree.search(10)).toBe('ten');
+    expect(await tree.search(10)).toBe('ten');
     
     await tree.close();
+    await cleanupFile(filename);
   });
 
   it('should persist and reload multiple key-value pairs', async () => {
@@ -79,7 +103,8 @@ describe.skipIf(!hasOPFS)('BPlusTree Persistence', () => {
     ];
 
     // Create and populate tree
-    let tree = new BPlusTree(filename, 3);
+    let tree = await createTestTree(3);
+    const filename = tree._testFilename;
     await tree.open();
     
     for (const [key, value] of testData) {
@@ -90,7 +115,7 @@ describe.skipIf(!hasOPFS)('BPlusTree Persistence', () => {
     await tree.close();
 
     // Reopen and verify all data
-    tree = new BPlusTree(filename, 3);
+    tree = await reopenTree(filename, 3);
     await tree.open();
     
     expect(tree.size()).toBe(testData.length);
@@ -99,13 +124,15 @@ describe.skipIf(!hasOPFS)('BPlusTree Persistence', () => {
     }
     
     await tree.close();
+    await cleanupFile(filename);
   });
 
   it('should persist and reload large dataset', async () => {
     const count = 100;
     
     // Create and populate tree
-    let tree = new BPlusTree(filename, 5);
+    let tree = await createTestTree(5);
+    const filename = tree._testFilename;
     await tree.open();
     
     for (let i = 0; i < count; i++) {
@@ -116,7 +143,7 @@ describe.skipIf(!hasOPFS)('BPlusTree Persistence', () => {
     await tree.close();
 
     // Reopen and verify all data
-    tree = new BPlusTree(filename, 5);
+    tree = await reopenTree(filename, 5);
     await tree.open();
     
     expect(tree.size()).toBe(count);
@@ -125,6 +152,7 @@ describe.skipIf(!hasOPFS)('BPlusTree Persistence', () => {
     }
     
     await tree.close();
+    await cleanupFile(filename);
   });
 
   it('should persist and reload with multiple close/reopen cycles', async () => {
@@ -135,7 +163,8 @@ describe.skipIf(!hasOPFS)('BPlusTree Persistence', () => {
     ];
 
     // First cycle: add initial data
-    let tree = new BPlusTree(filename, 3);
+    let tree = await createTestTree(3);
+    const filename = tree._testFilename;
     await tree.open();
     
     for (const [key, value] of testData) {
@@ -144,7 +173,7 @@ describe.skipIf(!hasOPFS)('BPlusTree Persistence', () => {
     await tree.close();
 
     // Second cycle: verify and add more data
-    tree = new BPlusTree(filename, 3);
+    tree = await reopenTree(filename, 3);
     await tree.open();
     
     expect(tree.size()).toBe(3);
@@ -157,7 +186,7 @@ describe.skipIf(!hasOPFS)('BPlusTree Persistence', () => {
     await tree.close();
 
     // Third cycle: verify all data
-    tree = new BPlusTree(filename, 3);
+    tree = await reopenTree(filename, 3);
     await tree.open();
     
     expect(tree.size()).toBe(5);
@@ -168,6 +197,7 @@ describe.skipIf(!hasOPFS)('BPlusTree Persistence', () => {
     expect(await tree.search(25)).toBe('twenty-five');
     
     await tree.close();
+    await cleanupFile(filename);
   });
 
   it('should persist string keys across close/reopen', async () => {
@@ -180,7 +210,8 @@ describe.skipIf(!hasOPFS)('BPlusTree Persistence', () => {
     ];
 
     // Create and populate tree
-    let tree = new BPlusTree(filename, 3);
+    let tree = await createTestTree(3);
+    const filename = tree._testFilename;
     await tree.open();
     
     for (const [key, value] of stringData) {
@@ -191,7 +222,7 @@ describe.skipIf(!hasOPFS)('BPlusTree Persistence', () => {
     await tree.close();
 
     // Reopen and verify
-    tree = new BPlusTree(filename, 3);
+    tree = await reopenTree(filename, 3);
     await tree.open();
     
     expect(tree.size()).toBe(stringData.length);
@@ -200,6 +231,7 @@ describe.skipIf(!hasOPFS)('BPlusTree Persistence', () => {
     }
     
     await tree.close();
+    await cleanupFile(filename);
   });
 
   it('should persist complex values across close/reopen', async () => {
@@ -212,7 +244,8 @@ describe.skipIf(!hasOPFS)('BPlusTree Persistence', () => {
     ];
 
     // Create and populate tree
-    let tree = new BPlusTree(filename, 3);
+    let tree = await createTestTree(3);
+    const filename = tree._testFilename;
     await tree.open();
     
     for (const [key, value] of complexData) {
@@ -223,7 +256,7 @@ describe.skipIf(!hasOPFS)('BPlusTree Persistence', () => {
     await tree.close();
 
     // Reopen and verify
-    tree = new BPlusTree(filename, 3);
+    tree = await reopenTree(filename, 3);
     await tree.open();
     
     expect(tree.size()).toBe(complexData.length);
@@ -233,11 +266,13 @@ describe.skipIf(!hasOPFS)('BPlusTree Persistence', () => {
     }
     
     await tree.close();
+    await cleanupFile(filename);
   });
 
   it('should persist after deletions', async () => {
     // Create and populate tree
-    let tree = new BPlusTree(filename, 3);
+    let tree = await createTestTree(3);
+    const filename = tree._testFilename;
     await tree.open();
     
     const initialData = [[5, 'five'], [10, 'ten'], [15, 'fifteen'], [20, 'twenty']];
@@ -252,7 +287,7 @@ describe.skipIf(!hasOPFS)('BPlusTree Persistence', () => {
     await tree.close();
 
     // Reopen and verify deletions persisted
-    tree = new BPlusTree(filename, 3);
+    tree = await reopenTree(filename, 3);
     await tree.open();
     
     expect(tree.size()).toBe(3);
@@ -262,11 +297,13 @@ describe.skipIf(!hasOPFS)('BPlusTree Persistence', () => {
     expect(await tree.search(20)).toBe('twenty');
     
     await tree.close();
+    await cleanupFile(filename);
   });
 
   it('should persist empty tree after clearing all data', async () => {
     // Create and populate tree
-    let tree = new BPlusTree(filename, 3);
+    let tree = await createTestTree(3);
+    const filename = tree._testFilename;
     await tree.open();
     
     const data = [[5, 'five'], [10, 'ten'], [15, 'fifteen']];
@@ -283,13 +320,14 @@ describe.skipIf(!hasOPFS)('BPlusTree Persistence', () => {
     await tree.close();
 
     // Reopen and verify empty
-    tree = new BPlusTree(filename, 3);
+    tree = await reopenTree(filename, 3);
     await tree.open();
     
     expect(tree.isEmpty()).toBe(true);
     expect(tree.size()).toBe(0);
     
     await tree.close();
+    await cleanupFile(filename);
   });
 
   it('should preserve tree order across close/reopen', async () => {
@@ -297,7 +335,8 @@ describe.skipIf(!hasOPFS)('BPlusTree Persistence', () => {
     const count = 50;
 
     // Create and populate tree with custom order
-    let tree = new BPlusTree(filename, order);
+    let tree = await createTestTree(order);
+    const filename = tree._testFilename;
     await tree.open();
     
     for (let i = 0; i < count; i++) {
@@ -307,20 +346,22 @@ describe.skipIf(!hasOPFS)('BPlusTree Persistence', () => {
     await tree.close();
 
     // Reopen and verify order is preserved
-    tree = new BPlusTree(filename, order);
+    tree = await reopenTree(filename, order);
     await tree.open();
     
     expect(tree.order).toBe(order);
     expect(tree.size()).toBe(count);
     
     await tree.close();
+    await cleanupFile(filename);
   });
 
   it('should handle toArray() after reload', async () => {
     const testData = [[3, 'c'], [1, 'a'], [2, 'b']];
 
     // Create and populate tree
-    let tree = new BPlusTree(filename, 3);
+    let tree = await createTestTree(3);
+    const filename = tree._testFilename;
     await tree.open();
     
     for (const [key, value] of testData) {
@@ -333,7 +374,7 @@ describe.skipIf(!hasOPFS)('BPlusTree Persistence', () => {
     await tree.close();
 
     // Reopen and check toArray
-    tree = new BPlusTree(filename, 3);
+    tree = await reopenTree(filename, 3);
     await tree.open();
     
     array = await tree.toArray();
@@ -344,5 +385,6 @@ describe.skipIf(!hasOPFS)('BPlusTree Persistence', () => {
     expect(array[2].key).toBe(3);
     
     await tree.close();
+    await cleanupFile(filename);
   });
 });

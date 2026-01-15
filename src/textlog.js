@@ -16,7 +16,7 @@
  * - Final record: Metadata {version, snapshotPointer, latestPointer, diffCount, diffsPerSnapshot}
  */
 
-import { BJsonFile, Pointer, getFileHandle, deleteFile } from './bjson.js';
+import { BJsonFile, Pointer } from './bjson.js';
 import { createPatch, applyPatch, structuredPatch } from 'diff';
 import { createHash } from 'crypto';
 
@@ -32,21 +32,17 @@ const ENTRY_TYPE = {
 export class TextLog {
   /**
    * Creates a new TextLog instance
-   * @param {string} filename - Path to storage file
+   * @param {FileSystemSyncAccessHandle} syncHandle - Sync access handle to storage file
    * @param {number} diffsPerSnapshot - Number of diffs between full snapshots (default: 10)
    */
-  constructor(filename, diffsPerSnapshot = 10) {
+  constructor(syncHandle, diffsPerSnapshot = 10) {
     if (diffsPerSnapshot < 1) {
       throw new Error('diffsPerSnapshot must be at least 1');
     }
     
-    this.filename = filename;
+    this.file = new BJsonFile(syncHandle);
     this.diffsPerSnapshot = diffsPerSnapshot;
     
-    // OPFS handles
-    this.dirHandle = null;
-    this.fileHandle = null;
-    this.file = null;
     this.isOpen = false;
     
     // Metadata
@@ -57,35 +53,16 @@ export class TextLog {
   }
   
   /**
-   * Open the TextLog file (create if doesn't exist)
+   * Open the TextLog (load or initialize metadata)
    */
   async open() {
     if (this.isOpen) {
-      throw new Error('TextLog file is already open');
-    }
-    
-    // Get OPFS directory
-    if (!navigator.storage || !navigator.storage.getDirectory) {
-      throw new Error('Origin Private File System (OPFS) is not supported in this browser');
-    }
-    this.dirHandle = await navigator.storage.getDirectory();
-
-    // Check if file exists
-    let exists = false;
-    try {
-      this.fileHandle = await getFileHandle(this.dirHandle, this.filename);
-      exists = true;
-    } catch (error) {
-      if (error.name !== 'NotFoundError') {
-        throw error;
-      }
+      throw new Error('TextLog is already open');
     }
 
-    // Get or create file handle
-    this.fileHandle = await getFileHandle(this.dirHandle, this.filename, { create: true });
-    const syncHandle = await this.fileHandle.createSyncAccessHandle();
-    this.file = new BJsonFile(syncHandle);
-    
+    const fileSize = this.file.getFileSize();
+    const exists = fileSize > 0;
+
     if (exists) {
       // Load existing log
       await this._loadMetadata();
@@ -98,7 +75,7 @@ export class TextLog {
   }
   
   /**
-   * Close the TextLog file
+   * Close the TextLog
    */
   async close() {
     if (this.isOpen) {
@@ -107,9 +84,6 @@ export class TextLog {
         this.file.flush();
         await this.file.syncAccessHandle.close();
       }
-      this.file = null;
-      this.fileHandle = null;
-      this.dirHandle = null;
       this.isOpen = false;
     }
   }

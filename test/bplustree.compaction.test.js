@@ -34,6 +34,15 @@ describe.skipIf(!hasOPFS)('BPlusTree Compaction', function() {
     return `test-bplustree-${Date.now()}-${testFileCounter++}.bjson`;
   }
 
+  async function createTestTree(order = 3) {
+    const filename = getTestFilename();
+    const fileHandle = await getFileHandle(rootDirHandle, filename, { create: true });
+    const syncHandle = await fileHandle.createSyncAccessHandle();
+    const tree = new BPlusTree(syncHandle, order);
+    tree._testFilename = filename;
+    return tree;
+  }
+
   async function cleanupFile(filename) {
       if (rootDirHandle) {
         await deleteFile(rootDirHandle, filename);
@@ -41,13 +50,11 @@ describe.skipIf(!hasOPFS)('BPlusTree Compaction', function() {
   }
 
   let tree;
-  let filename;
   let compactedFilename;
 
   beforeEach(async function() {
-    filename = getTestFilename();
+    tree = await createTestTree(3);
     compactedFilename = getTestFilename();
-    tree = new BPlusTree(filename, 3);
     await tree.open();
   });
 
@@ -55,7 +62,9 @@ describe.skipIf(!hasOPFS)('BPlusTree Compaction', function() {
     if (tree && tree.isOpen) {
       await tree.close();
     }
-    await cleanupFile(filename);
+    if (tree && tree._testFilename) {
+      await cleanupFile(tree._testFilename);
+    }
     await cleanupFile(compactedFilename);
   });
 
@@ -72,15 +81,22 @@ describe.skipIf(!hasOPFS)('BPlusTree Compaction', function() {
       await tree.add(i, `value${i}`);
     }
 
-    const result = await tree.compact(compactedFilename);
+    // Create sync handle for compacted file
+    const compactedFileHandle = await getFileHandle(rootDirHandle, compactedFilename, { create: true });
+    const compactedSyncHandle = await compactedFileHandle.createSyncAccessHandle();
 
-    expect(result.newFilename).toBe(compactedFilename);
+    const result = await tree.compact(compactedSyncHandle);
+
     expect(result.oldSize).toBeGreaterThan(result.newSize);
     expect(result.bytesSaved).toBeGreaterThan(0);
 
     const originalEntries = await tree.toArray();
 
-    const compactedTree = new BPlusTree(compactedFilename, 3);
+    // Reopen compacted tree using new API
+    const fileHandle = await getFileHandle(rootDirHandle, compactedFilename, { create: false });
+    const syncHandle = await fileHandle.createSyncAccessHandle();
+    const compactedTree = new BPlusTree(syncHandle, 3);
+    compactedTree._testFilename = compactedFilename;
     await compactedTree.open();
     const compactedEntries = await compactedTree.toArray();
     const spotCheck = await compactedTree.search(79);

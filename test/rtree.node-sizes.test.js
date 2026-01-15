@@ -34,19 +34,39 @@ if (hasOPFS) {
   });
 }
 
-async function cleanup() {
+let testFileCounter = 0;
+
+function getTestFilename() {
+  return `test-rtree-node-sizes-${Date.now()}-${testFileCounter++}.bjson`;
+}
+
+async function createTestTree(order = 4) {
+  const filename = getTestFilename();
+  const fileHandle = await getFileHandle(rootDirHandle, filename, { create: true });
+  const syncHandle = await fileHandle.createSyncAccessHandle();
+  const tree = new RTree(syncHandle, order);
+  tree._testFilename = filename;
+  return tree;
+}
+
+async function reopenTree(filename, order = 4) {
+  const fileHandle = await getFileHandle(rootDirHandle, filename, { create: false });
+  const syncHandle = await fileHandle.createSyncAccessHandle();
+  const tree = new RTree(syncHandle, order);
+  tree._testFilename = filename;
+  return tree;
+}
+
+async function cleanupFile(filename) {
     if (rootDirHandle) {
-      await deleteFile(rootDirHandle, 'test-rtree-node-sizes.bjson');
+      await deleteFile(rootDirHandle, filename);
     }
 }
 
 describe.skipIf(!hasOPFS)('R-tree Node Size Handling', () => {
-  afterEach(async () => {
-    await cleanup();
-  });
 
   it('should handle small nodes (1 entry)', async () => {
-    const tree = new RTree('test-rtree-node-sizes.bjson', 4);
+    const tree = await createTestTree(4);
     await tree.open();
 
     const lat = 40.7128;
@@ -67,10 +87,11 @@ describe.skipIf(!hasOPFS)('R-tree Node Size Handling', () => {
     expect(results[0]).toEqual({objectId:id,lat,lng});
 
     await tree.close();
+    await cleanupFile(tree._testFilename);
   });
 
   it('should handle medium nodes (4 entries - single node)', async () => {
-    const tree = new RTree('test-rtree-node-sizes.bjson', 4);
+    const tree = await createTestTree(4);
     await tree.open();
 
     const entries = [
@@ -94,10 +115,11 @@ describe.skipIf(!hasOPFS)('R-tree Node Size Handling', () => {
     }
 
     await tree.close();
+    await cleanupFile(tree._testFilename);
   });
 
   it('should handle large nodes (8 entries - causes splits with maxEntries=4)', async () => {
-    const tree = new RTree('test-rtree-node-sizes.bjson', 4);
+    const tree = await createTestTree(4);
     await tree.open();
 
     const entries = [
@@ -120,7 +142,7 @@ describe.skipIf(!hasOPFS)('R-tree Node Size Handling', () => {
 
     // Verify persistence - close and reopen
     await tree.close();
-    const tree2 = new RTree('test-rtree-node-sizes.bjson', 4);
+    const tree2 = await reopenTree(tree._testFilename, 4);
     await tree2.open();
 
     expect(tree2.size()).toBe(8);
@@ -132,10 +154,11 @@ describe.skipIf(!hasOPFS)('R-tree Node Size Handling', () => {
     }
 
     await tree2.close();
+    await cleanupFile(tree._testFilename);
   });
 
   it('should handle very large nodes with extensive metadata', { timeout: 15000 }, async () => {
-    const tree = new RTree('test-rtree-node-sizes.bjson', 8);
+    const tree = await createTestTree(8);
     await tree.open();
 
     // Insert ObjectIds at random locations
@@ -152,7 +175,7 @@ describe.skipIf(!hasOPFS)('R-tree Node Size Handling', () => {
 
     // Verify persistence with large nodes
     await tree.close();
-    const tree2 = new RTree('test-rtree-node-sizes.bjson', 8);
+    const tree2 = await reopenTree(tree._testFilename, 8);
     await tree2.open();
 
     expect(tree2.size()).toBe(16);
@@ -167,10 +190,11 @@ describe.skipIf(!hasOPFS)('R-tree Node Size Handling', () => {
     expect(results.length).toBeGreaterThan(0);
 
     await tree2.close();
+    await cleanupFile(tree._testFilename);
   });
 
   it('should handle extremely large nodes (50 entries)', { timeout: 60000 }, async () => {
-    const tree = new RTree('test-rtree-node-sizes.bjson', 16);
+    const tree = await createTestTree(16);
     await tree.open();
 
     // Insert 50 entries with ObjectIds
@@ -187,7 +211,7 @@ describe.skipIf(!hasOPFS)('R-tree Node Size Handling', () => {
 
     // Verify persistence
     await tree.close();
-    const tree2 = new RTree('test-rtree-node-sizes.bjson', 16);
+    const tree2 = await reopenTree(tree._testFilename, 16);
     await tree2.open();
 
     expect(tree2.size()).toBe(50);
@@ -202,10 +226,11 @@ describe.skipIf(!hasOPFS)('R-tree Node Size Handling', () => {
     expect(results.length).toBeGreaterThan(0);
 
     await tree2.close();
+    await cleanupFile(tree._testFilename);
   });
 
   it('should handle nodes with deeply nested structures', async () => {
-    const tree = new RTree('test-rtree-node-sizes.bjson', 4);
+    const tree = await createTestTree(4);
     await tree.open();
 
     for (let i = 0; i < 8; i++) {
@@ -219,7 +244,7 @@ describe.skipIf(!hasOPFS)('R-tree Node Size Handling', () => {
 
     // Verify persistence with nested structures
     await tree.close();
-    const tree2 = new RTree('test-rtree-node-sizes.bjson', 4);
+    const tree2 = await reopenTree(tree._testFilename, 4);
     await tree2.open();
 
     expect(tree2.size()).toBe(8);
@@ -234,10 +259,11 @@ describe.skipIf(!hasOPFS)('R-tree Node Size Handling', () => {
     expect(results.length).toBeGreaterThan(0);
 
     await tree2.close();
+    await cleanupFile(tree._testFilename);
   });
 
   it('should handle mixed size nodes and queries', { timeout: 30000 }, async () => {
-    const tree = new RTree('test-rtree-node-sizes.bjson', 6);
+    const tree = await createTestTree(6);
     await tree.open();
 
     // Insert entries with ObjectIds
@@ -252,7 +278,7 @@ describe.skipIf(!hasOPFS)('R-tree Node Size Handling', () => {
 
     // Verify persistence
     await tree.close();
-    const tree2 = new RTree('test-rtree-node-sizes.bjson', 6);
+    const tree2 = await reopenTree(tree._testFilename, 6);
     await tree2.open();
 
     expect(tree2.size()).toBe(20);
@@ -278,10 +304,11 @@ describe.skipIf(!hasOPFS)('R-tree Node Size Handling', () => {
     expect(radius.length).toBeGreaterThanOrEqual(0);
 
     await tree2.close();
+    await cleanupFile(tree._testFilename);
   });
 
   it('should track and report node sizes during operations', async () => {
-    const tree = new RTree('test-rtree-node-sizes.bjson', 5);
+    const tree = await createTestTree(5);
     await tree.open();
 
     console.log('\n  Node size growth during insertions:');
@@ -306,5 +333,6 @@ describe.skipIf(!hasOPFS)('R-tree Node Size Handling', () => {
     expect(nodeSizes[nodeSizes.length - 1]).toBeGreaterThan(nodeSizes[0]);
 
     await tree.close();
+    await cleanupFile(tree._testFilename);
   });
 });

@@ -148,8 +148,8 @@ class RTreeNode {
  * On-disk R-tree implementation
  */
 export class RTree {
-	constructor(filename, maxEntries = 9) {
-		this.filename = filename;
+	constructor(syncHandle, maxEntries = 9) {
+		this.file = new BJsonFile(syncHandle);
 		this.maxEntries = maxEntries;
 		this.minEntries = Math.max(2, Math.ceil(maxEntries / 2));
 		
@@ -158,42 +158,19 @@ export class RTree {
 		this.nextId = 1;
 		this._size = 0;
 		
-		// OPFS handles
-		this.dirHandle = null;
-		this.fileHandle = null;
-		this.file = null;
 		this.isOpen = false;
 	}
 
 	/**
-	 * Open the R-tree file (create if doesn't exist)
+	 * Open the R-tree (load or initialize metadata)
 	 */
 	async open() {
 		if (this.isOpen) {
-			throw new Error('R-tree file is already open');
+			throw new Error('R-tree is already open');
 		}
 
-		// Get OPFS directory
-		if (!navigator.storage || !navigator.storage.getDirectory) {
-			throw new Error('Origin Private File System (OPFS) is not supported in this browser');
-		}
-		this.dirHandle = await navigator.storage.getDirectory();
-
-		// Check if file exists
-		let exists = false;
-		try {
-			this.fileHandle = await getFileHandle(this.dirHandle, this.filename);
-			exists = true;
-		} catch (error) {
-			if (error.name !== 'NotFoundError') {
-				throw error;
-			}
-		}
-
-		// Get or create file handle
-		this.fileHandle = await getFileHandle(this.dirHandle, this.filename, { create: true });
-		const syncHandle = await this.fileHandle.createSyncAccessHandle();
-		this.file = new BJsonFile(syncHandle);
+		const fileSize = this.file.getFileSize();
+		const exists = fileSize > 0;
 
 		if (exists) {
 			// Load existing tree
@@ -207,7 +184,7 @@ export class RTree {
 	}
 
 	/**
-	 * Close the R-tree file
+	 * Close the R-tree
 	 */
 	async close() {
 		if (this.isOpen) {
@@ -216,9 +193,6 @@ export class RTree {
 				this.file.flush();
 				await this.file.syncAccessHandle.close();
 			}
-			this.file = null;
-			this.fileHandle = null;
-			this.dirHandle = null;
 			this.isOpen = false;
 		}
 	}
@@ -898,40 +872,41 @@ export class RTree {
 	}
 
 	/**
-	 * Clear all entries from the tree
+	 * Clear all entries from the tree by appending a new empty root node
+	 * Preserves the append-only file structure
 	 */
 	async clear() {
-		await this.close();
+		// Create a new empty root node and append it to the file
+		const newRoot = new RTreeNode(this, {
+			id: this.nextId++,
+			isLeaf: true,
+			children: [],
+			bbox: null
+		});
 		
-		// Delete file
-		await deleteFile(this.dirHandle || await navigator.storage.getDirectory(), this.filename);
-		
-		// Reinitialize
-		this.dirHandle = null;
-		this.fileHandle = null;
-		this.file = null;
-		this.isOpen = false;
-		await this.open();
+		this.rootPointer = this._saveNode(newRoot);
+		this._size = 0;
+		this._writeMetadata();
 	}
 
 	/**
 	 * Compact the R-tree by copying the current root and all reachable nodes into a new file.
 	 * Returns size metrics to show reclaimed space.
-	 * @param {string} destinationFilename
+	 * @param {FileSystemSyncAccessHandle} destSyncHandle - Sync handle for destination file
 	 */
-	async compact(destinationFilename) {
+	async compact(destSyncHandle) {
 		if (!this.isOpen) {
 			throw new Error('R-tree file must be opened before use');
 		}
-		if (!destinationFilename) {
-			throw new Error('Destination filename is required for compaction');
+		if (!destSyncHandle) {
+			throw new Error('Destination sync handle is required for compaction');
 		}
 
 		// Flush current metadata so size reflects latest state
 		this._writeMetadata();
 		const oldSize = this.file.getFileSize();
 
-		const dest = new RTree(destinationFilename, this.maxEntries);
+		const dest = new RTree(destSyncHandle, this.maxEntries);
 		await dest.open();
 		
 		// After opening, set the properties we want to preserve
@@ -978,19 +953,16 @@ export class RTree {
 		dest.rootPointer = newRootPointer;
 
 		dest._writeMetadata();
+		
+		// Get size of destination file BEFORE closing
+		const newSize = dest.file.getFileSize();
+		
 		await dest.close();
-
-		// Get size of destination file
-		const destFileHandle = await getFileHandle(this.dirHandle, destinationFilename);
-		const destSyncHandle = await destFileHandle.createSyncAccessHandle();
-		const newSize = destSyncHandle.getSize();
-		await destSyncHandle.close();
 
 		return {
 			oldSize,
 			newSize,
-			bytesSaved: Math.max(0, oldSize - newSize),
-			newFilename: destinationFilename
+			bytesSaved: Math.max(0, oldSize - newSize)
 		};
 	}
 }

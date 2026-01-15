@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { BPlusTree } from '../src/bplustree.js';
-import { ObjectId, Pointer } from '../src/bjson.js';
+import { ObjectId, Pointer, getFileHandle } from '../src/bjson.js';
 
 // Set up node-opfs for Node.js environment
 try {
@@ -78,7 +78,12 @@ async function main() {
 
   let tree;
   try {
-    tree = new BPlusTree(filePath);
+    // Get the root directory handle and file handle
+    const rootDirHandle = await navigator.storage.getDirectory();
+    const fileHandle = await getFileHandle(rootDirHandle, filePath, { create: false });
+    const syncHandle = await fileHandle.createSyncAccessHandle();
+    
+    tree = new BPlusTree(syncHandle, 3, rootDirHandle, filePath);
     await tree.open();
 
     const entries = await tree.toArray();

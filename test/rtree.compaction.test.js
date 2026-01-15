@@ -34,6 +34,23 @@ describe.skipIf(!hasOPFS)('R-tree Compaction', function() {
     return `test-rtree-${Date.now()}-${testFileCounter++}.bjson`;
   }
 
+  async function createTestTree(order = 4) {
+    const filename = getTestFilename();
+    const fileHandle = await getFileHandle(rootDirHandle, filename, { create: true });
+    const syncHandle = await fileHandle.createSyncAccessHandle();
+    const tree = new RTree(syncHandle, order);
+    tree._testFilename = filename;
+    return tree;
+  }
+
+  async function reopenTree(filename, order = 4) {
+    const fileHandle = await getFileHandle(rootDirHandle, filename, { create: false });
+    const syncHandle = await fileHandle.createSyncAccessHandle();
+    const tree = new RTree(syncHandle, order);
+    tree._testFilename = filename;
+    return tree;
+  }
+
   async function cleanupFile(filename) {
       if (rootDirHandle) {
         await deleteFile(rootDirHandle, filename);
@@ -41,13 +58,11 @@ describe.skipIf(!hasOPFS)('R-tree Compaction', function() {
   }
 
   let tree;
-  let filename;
   let compactedFilename;
 
   beforeEach(async function() {
-    filename = getTestFilename();
+    tree = await createTestTree(4);
     compactedFilename = getTestFilename();
-    tree = new RTree(filename, 4);
     await tree.open();
   });
 
@@ -55,7 +70,9 @@ describe.skipIf(!hasOPFS)('R-tree Compaction', function() {
     if (tree && tree.isOpen) {
       await tree.close();
     }
-    await cleanupFile(filename);
+    if (tree && tree._testFilename) {
+      await cleanupFile(tree._testFilename);
+    }
     await cleanupFile(compactedFilename);
   });
 
@@ -73,12 +90,16 @@ describe.skipIf(!hasOPFS)('R-tree Compaction', function() {
     const originalIds = (await tree.searchBBox(worldBox)).map(id => id.toString()).sort();
     expect(originalIds.length).toBe(insertedIds.length);
 
-    const result = await tree.compact(compactedFilename);
-    expect(result.newFilename).toBe(compactedFilename);
+    // Create sync handle for compacted file
+    const compactedFileHandle = await getFileHandle(rootDirHandle, compactedFilename, { create: true });
+    const compactedSyncHandle = await compactedFileHandle.createSyncAccessHandle();
+    
+    const result = await tree.compact(compactedSyncHandle);
     expect(result.oldSize).toBeGreaterThan(result.newSize);
     expect(result.bytesSaved).toBeGreaterThan(0);
 
-    const compactedTree = new RTree(compactedFilename, 4);
+    // Reopen compacted tree using new API
+    const compactedTree = await reopenTree(compactedFilename, 4);
     await compactedTree.open();
     const compactedIds = (await compactedTree.searchBBox(worldBox)).map(id => id.toString()).sort();
     expect(compactedIds).toEqual(originalIds);

@@ -31,6 +31,21 @@ if (hasOPFS) {
   });
 }
 
+let testFileCounter = 0;
+
+function getTestFilename() {
+  return `test-rtree-decode-${Date.now()}-${testFileCounter++}.bjson`;
+}
+
+async function createTestTree(order = 4) {
+  const filename = getTestFilename();
+  const fileHandle = await getFileHandle(rootDirHandle, filename, { create: true });
+  const syncHandle = await fileHandle.createSyncAccessHandle();
+  const tree = new RTree(syncHandle, order);
+  tree._testFilename = filename;
+  return tree;
+}
+
 function runCli(filePath) {
   return new Promise((resolve, reject) => {
     execFile('node', ['bin/rtree-decode.js', filePath], { cwd: process.cwd() }, (error, stdout, stderr) => {
@@ -52,23 +67,11 @@ async function cleanupFile(filename) {
 }
 
 describe.skipIf(!hasOPFS)('rtree-decode CLI', () => {
-  afterEach(async () => {
-    // Clean up all test files
-    await cleanupFile('test-rtree-decode-cli.bjson');
-    await cleanupFile('test-rtree-decode-empty.bjson');
-    await cleanupFile('test-rtree-decode-many.bjson');
-    await cleanupFile('test-rtree-decode-oids.bjson');
-  });
 
   it('decodes and prints R-tree with spatial points', async () => {
-    const filename = 'test-rtree-decode-cli.bjson';
-    
-    // Clean up before test
-    await cleanupFile(filename);
-    
-    // Create and populate tree
-    const tree = new RTree(filename, 4);
+    const tree = await createTestTree(4);
     await tree.open();
+    const filename = tree._testFilename;
     
     const id1 = new ObjectId('5f1d7f3a0b0c0d0e0f101112');
     const id2 = new ObjectId('6a6b6c6d6e6f707172737475');
@@ -82,6 +85,9 @@ describe.skipIf(!hasOPFS)('rtree-decode CLI', () => {
     
     // Run CLI tool
     const { stdout } = await runCli(filename);
+    
+    // Clean up after CLI
+    await cleanupFile(filename);
     
     // Check output contains expected formatting
     expect(stdout).toContain('0:');
@@ -103,31 +109,24 @@ describe.skipIf(!hasOPFS)('rtree-decode CLI', () => {
   });
 
   it('handles empty R-tree', async () => {
-    const filename = 'test-rtree-decode-empty.bjson';
-    
-    // Clean up before test
-    await cleanupFile(filename);
-    
-    // Create empty tree
-    const tree = new RTree(filename, 4);
+    const tree = await createTestTree(4);
     await tree.open();
+    const filename = tree._testFilename;
     await tree.close();
     
     // Run CLI tool
     const { stdout } = await runCli(filename);
     
+    // Clean up after CLI
+    await cleanupFile(filename);
+    
     expect(stdout).toContain('R-tree is empty');
   });
 
   it('displays all points from tree with many entries', async () => {
-    const filename = 'test-rtree-decode-many.bjson';
-    
-    // Clean up before test
-    await cleanupFile(filename);
-    
-    // Create tree with multiple points
-    const tree = new RTree(filename, 4);
+    const tree = await createTestTree(4);
     await tree.open();
+    const filename = tree._testFilename;
     
     const points = [];
     for (let i = 0; i < 10; i++) {
@@ -142,6 +141,9 @@ describe.skipIf(!hasOPFS)('rtree-decode CLI', () => {
     
     // Run CLI tool
     const { stdout } = await runCli(filename);
+    
+    // Clean up after CLI
+    await cleanupFile(filename);
         
     // Verify all ObjectIds are present
     for (const point of points) {
@@ -150,14 +152,9 @@ describe.skipIf(!hasOPFS)('rtree-decode CLI', () => {
   });
 
   it('displays points with different ObjectId formats', async () => {
-    const filename = 'test-rtree-decode-oids.bjson';
-    
-    // Clean up before test
-    await cleanupFile(filename);
-    
-    // Create tree with various ObjectIds
-    const tree = new RTree(filename, 4);
+    const tree = await createTestTree(4);
     await tree.open();
+    const filename = tree._testFilename;
     
     const id1 = new ObjectId(); // Generated
     const id2 = new ObjectId('000000000000000000000000'); // All zeros
@@ -171,6 +168,9 @@ describe.skipIf(!hasOPFS)('rtree-decode CLI', () => {
     
     // Run CLI tool
     const { stdout } = await runCli(filename);
+    
+    // Clean up after CLI
+    await cleanupFile(filename);
     
     expect(stdout).toContain('ObjectId(000000000000000000000000)');
     expect(stdout).toContain('ObjectId(ffffffffffffffffffffffff)');

@@ -40,6 +40,23 @@ describe.skipIf(!hasOPFS)('TextLog', function() {
     return `test-textlog-${Date.now()}-${testFileCounter++}.bjson`;
   }
 
+  async function createTestLog(diffsPerSnapshot = 10) {
+    const filename = getTestFilename();
+    const fileHandle = await getFileHandle(rootDirHandle, filename, { create: true });
+    const syncHandle = await fileHandle.createSyncAccessHandle();
+    const log = new TextLog(syncHandle, diffsPerSnapshot);
+    log._testFilename = filename;
+    return log;
+  }
+
+  async function reopenLog(filename, diffsPerSnapshot = 10) {
+    const fileHandle = await getFileHandle(rootDirHandle, filename, { create: false });
+    const syncHandle = await fileHandle.createSyncAccessHandle();
+    const log = new TextLog(syncHandle, diffsPerSnapshot);
+    log._testFilename = filename;
+    return log;
+  }
+
   async function cleanupFile(filename) {
       if (rootDirHandle) {
         await deleteFile(rootDirHandle, filename);
@@ -47,39 +64,43 @@ describe.skipIf(!hasOPFS)('TextLog', function() {
   }
 
   describe('Constructor', function() {
-    it('should create a TextLog with default diffsPerSnapshot', function() {
-      const log = new TextLog('test.bjson');
+    it('should create a TextLog with default diffsPerSnapshot', async function() {
+      const log = await createTestLog();
       expect(log.diffsPerSnapshot).toBe(10);
+      await log.file.syncAccessHandle.close();
+      await cleanupFile(log._testFilename);
     });
 
-    it('should create a TextLog with custom diffsPerSnapshot', function() {
-      const log = new TextLog('test.bjson', 5);
+    it('should create a TextLog with custom diffsPerSnapshot', async function() {
+      const log = await createTestLog(5);
       expect(log.diffsPerSnapshot).toBe(5);
+      await log.file.syncAccessHandle.close();
+      await cleanupFile(log._testFilename);
     });
 
-    it('should throw error for invalid diffsPerSnapshot', function() {
-      expect(() => new TextLog('test.bjson', 0)).toThrow('diffsPerSnapshot must be at least 1');
-      expect(() => new TextLog('test.bjson', -1)).toThrow('diffsPerSnapshot must be at least 1');
+    it('should throw error for invalid diffsPerSnapshot', async function() {
+      const fileHandle = await getFileHandle(rootDirHandle, getTestFilename(), { create: true });
+      const syncHandle = await fileHandle.createSyncAccessHandle();
+      expect(() => new TextLog(syncHandle, 0)).toThrow('diffsPerSnapshot must be at least 1');
+      expect(() => new TextLog(syncHandle, -1)).toThrow('diffsPerSnapshot must be at least 1');
+      await syncHandle.close();
     });
   });
 
   describe('Basic operations', function() {
-    let filename;
     let log;
-
-    beforeEach(function() {
-      filename = getTestFilename();
-    });
 
     afterEach(async function() {
       if (log && log.isOpen) {
         await log.close();
       }
-      await cleanupFile(filename);
+      if (log && log._testFilename) {
+        await cleanupFile(log._testFilename);
+      }
     });
 
     it('should create and open new log', async function() {
-      log = new TextLog(filename, 5);
+      log = await createTestLog(5);
       await log.open();
 
       expect(log.isOpen).toBe(true);
@@ -89,7 +110,7 @@ describe.skipIf(!hasOPFS)('TextLog', function() {
     });
 
     it('should add first version as snapshot', async function() {
-      log = new TextLog(filename, 5);
+      log = await createTestLog(5);
       await log.open();
 
       const version = await log.addVersion('Hello, World!');
@@ -100,7 +121,7 @@ describe.skipIf(!hasOPFS)('TextLog', function() {
     });
 
     it('should retrieve added version', async function() {
-      log = new TextLog(filename, 5);
+      log = await createTestLog(5);
       await log.open();
 
       await log.addVersion('Hello, World!');
@@ -112,7 +133,7 @@ describe.skipIf(!hasOPFS)('TextLog', function() {
     });
 
     it('should add multiple versions', async function() {
-      log = new TextLog(filename, 5);
+      log = await createTestLog(5);
       await log.open();
 
       await log.addVersion('Version 1');
@@ -133,7 +154,7 @@ describe.skipIf(!hasOPFS)('TextLog', function() {
     });
 
     it('should handle empty text', async function() {
-      log = new TextLog(filename, 5);
+      log = await createTestLog(5);
       await log.open();
 
       await log.addVersion('');
@@ -145,7 +166,7 @@ describe.skipIf(!hasOPFS)('TextLog', function() {
     });
 
     it('should throw error for invalid version', async function() {
-      log = new TextLog(filename, 5);
+      log = await createTestLog(5);
       await log.open();
 
       await log.addVersion('Test');
@@ -175,7 +196,7 @@ describe.skipIf(!hasOPFS)('TextLog', function() {
 
     it('should create snapshot every N diffs', async function() {
       // Set diffsPerSnapshot to 3
-      log = new TextLog(filename, 3);
+      log = await createTestLog(3);
       await log.open();
 
       // Add 5 versions
@@ -196,7 +217,7 @@ describe.skipIf(!hasOPFS)('TextLog', function() {
     });
 
     it('should handle many versions with periodic snapshots', async function() {
-      log = new TextLog(filename, 5);
+      log = await createTestLog(5);
       await log.open();
 
       // Add 12 versions (should create snapshots at v1, v6, v11)
@@ -230,7 +251,7 @@ describe.skipIf(!hasOPFS)('TextLog', function() {
     });
 
     it('should create human-readable diff between versions', async function() {
-      log = new TextLog(filename, 5);
+      log = await createTestLog(5);
       await log.open();
 
       await log.addVersion('Hello\nWorld\n');
@@ -247,7 +268,7 @@ describe.skipIf(!hasOPFS)('TextLog', function() {
     });
 
     it('should handle diff with no changes', async function() {
-      log = new TextLog(filename, 5);
+      log = await createTestLog(5);
       await log.open();
 
       await log.addVersion('Same text');
@@ -263,7 +284,7 @@ describe.skipIf(!hasOPFS)('TextLog', function() {
     });
 
     it('should create diff between non-adjacent versions', async function() {
-      log = new TextLog(filename, 5);
+      log = await createTestLog(5);
       await log.open();
 
       await log.addVersion('Line 1\nLine 2\nLine 3\n');
@@ -282,7 +303,7 @@ describe.skipIf(!hasOPFS)('TextLog', function() {
     });
 
     it('should throw error for invalid diff versions', async function() {
-      log = new TextLog(filename, 5);
+      log = await createTestLog(5);
       await log.open();
 
       await log.addVersion('Test');
@@ -311,7 +332,7 @@ describe.skipIf(!hasOPFS)('TextLog', function() {
     });
 
     it('should compute SHA hash for each version', async function() {
-      log = new TextLog(filename, 5);
+      log = await createTestLog(5);
       await log.open();
 
       await log.addVersion('Hello, World!');
@@ -325,7 +346,7 @@ describe.skipIf(!hasOPFS)('TextLog', function() {
     });
 
     it('should produce same hash for same content', async function() {
-      log = new TextLog(filename, 5);
+      log = await createTestLog(5);
       await log.open();
 
       await log.addVersion('Same content');
@@ -340,7 +361,7 @@ describe.skipIf(!hasOPFS)('TextLog', function() {
     });
 
     it('should produce different hash for different content', async function() {
-      log = new TextLog(filename, 5);
+      log = await createTestLog(5);
       await log.open();
 
       await log.addVersion('Content A');
@@ -372,17 +393,18 @@ describe.skipIf(!hasOPFS)('TextLog', function() {
 
     it('should persist data across open/close cycles', async function() {
       // Create and populate log
-      log = new TextLog(filename, 5);
+      log = await createTestLog(5);
       await log.open();
       
       await log.addVersion('Version 1');
       await log.addVersion('Version 2');
       await log.addVersion('Version 3');
       
+      const filename = log._testFilename;
       await log.close();
 
       // Reopen and verify
-      log = new TextLog(filename, 5);
+      log = await reopenLog(filename, 5);
       await log.open();
       
       expect(log.getCurrentVersion()).toBe(3);
@@ -395,15 +417,16 @@ describe.skipIf(!hasOPFS)('TextLog', function() {
 
     it('should maintain metadata across sessions', async function() {
       // Create log with specific settings
-      log = new TextLog(filename, 7);
+      log = await createTestLog(7);
       await log.open();
       
       await log.addVersion('Test');
       
+      const filename2 = log._testFilename;
       await log.close();
 
       // Reopen and verify settings
-      log = new TextLog(filename, 7);
+      log = await reopenLog(filename2, 7);
       await log.open();
       
       expect(log.diffsPerSnapshot).toBe(7);
@@ -414,16 +437,17 @@ describe.skipIf(!hasOPFS)('TextLog', function() {
 
     it('should handle adding versions after reopening', async function() {
       // Create log and add versions
-      log = new TextLog(filename, 5);
+      log = await createTestLog(5);
       await log.open();
       
       await log.addVersion('Version 1');
       await log.addVersion('Version 2');
       
+      const filename3 = log._testFilename;
       await log.close();
 
       // Reopen and add more versions
-      log = new TextLog(filename, 5);
+      log = await reopenLog(filename3, 5);
       await log.open();
       
       await log.addVersion('Version 3');
@@ -455,7 +479,7 @@ describe.skipIf(!hasOPFS)('TextLog', function() {
     });
 
     it('should handle large text content', async function() {
-      log = new TextLog(filename, 5);
+      log = await createTestLog(5);
       await log.open();
 
       const largeText = 'Lorem ipsum '.repeat(1000);
@@ -468,7 +492,7 @@ describe.skipIf(!hasOPFS)('TextLog', function() {
     });
 
     it('should handle special characters', async function() {
-      log = new TextLog(filename, 5);
+      log = await createTestLog(5);
       await log.open();
 
       const specialText = '🎉 Unicode: café, naïve, 中文, 日本語\n\t\r\n';
@@ -481,7 +505,7 @@ describe.skipIf(!hasOPFS)('TextLog', function() {
     });
 
     it('should handle line-by-line changes', async function() {
-      log = new TextLog(filename, 5);
+      log = await createTestLog(5);
       await log.open();
 
       const text1 = 'Line 1\nLine 2\nLine 3\nLine 4\nLine 5\n';

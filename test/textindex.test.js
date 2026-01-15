@@ -1,5 +1,6 @@
 import { describe, it, beforeEach, afterEach, expect, beforeAll } from 'vitest';
 import { TextIndex } from '../src/textindex.js';
+import { BPlusTree } from '../src/bplustree.js';
 import { deleteFile, getFileHandle } from '../src/bjson.js';
 
 let hasOPFS = false;
@@ -51,9 +52,36 @@ describe.skipIf(!hasOPFS)('TextIndex', function() {
     }
   }
 
-  beforeEach(async function() {
+  async function createTestIndex() {
     baseName = `text-index-${Date.now()}-${counter++}`;
-    index = new TextIndex({ baseFilename: baseName });
+    
+    // Create three trees with sync handles
+    const indexHandle = await getFileHandle(rootDirHandle, `${baseName}-terms.bjson`, { create: true });
+    const indexSyncHandle = await indexHandle.createSyncAccessHandle();
+    const indexTree = new BPlusTree(indexSyncHandle, 16, rootDirHandle);
+    
+    const docTermsHandle = await getFileHandle(rootDirHandle, `${baseName}-documents.bjson`, { create: true });
+    const docTermsSyncHandle = await docTermsHandle.createSyncAccessHandle();
+    const docTermsTree = new BPlusTree(docTermsSyncHandle, 16, rootDirHandle);
+    
+    const lengthsHandle = await getFileHandle(rootDirHandle, `${baseName}-lengths.bjson`, { create: true });
+    const lengthsSyncHandle = await lengthsHandle.createSyncAccessHandle();
+    const lengthsTree = new BPlusTree(lengthsSyncHandle, 16, rootDirHandle);
+    
+    index = new TextIndex({
+      order: 16,
+      trees: {
+        index: indexTree,
+        documentTerms: docTermsTree,
+        documentLengths: lengthsTree
+      }
+    });
+    
+    return index;
+  }
+
+  beforeEach(async function() {
+    index = await createTestIndex();
     await index.open();
   });
 

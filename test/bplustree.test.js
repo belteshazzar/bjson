@@ -37,6 +37,15 @@ describe.skipIf(!hasOPFS)('BPlusTree', function() {
         return `test-bplustree-${Date.now()}-${testFileCounter++}.bjson`;
     }
 
+    async function createTestTree(order = 3) {
+        const filename = getTestFilename();
+        const fileHandle = await getFileHandle(rootDirHandle, filename, { create: true });
+        const syncHandle = await fileHandle.createSyncAccessHandle();
+        const tree = new BPlusTree(syncHandle, order, rootDirHandle);
+        tree._testFilename = filename;  // Store for cleanup
+        return tree;
+    }
+
     async function cleanupFile(filename) {
             if (rootDirHandle) {
               await deleteFile(rootDirHandle, filename);
@@ -44,47 +53,45 @@ describe.skipIf(!hasOPFS)('BPlusTree', function() {
     }
 
     describe('Constructor', function() {
-        let filename;
         let tree;
-
-        beforeEach(function() {
-            filename = getTestFilename();
-        });
 
         afterEach(async function() {
             if (tree && tree.isOpen) {
                 await tree.close();
             }
-            await cleanupFile(filename);
+            if (tree && tree._testFilename) {
+              await cleanupFile(tree._testFilename);
+            }
         });
 
         it('should create an empty tree with default order', async function() {
-            tree = new BPlusTree(filename);
+            tree = await createTestTree();
             await tree.open();
             expect(tree.isEmpty()).toBe(true);
             expect(tree.size()).toBe(0);
         });
 
         it('should create an empty tree with custom order', async function() {
-            tree = new BPlusTree(filename, 5);
+            tree = await createTestTree(5);
             await tree.open();
             expect(tree.isEmpty()).toBe(true);
             expect(tree.order).toBe(5);
         });
 
-        it('should throw error for invalid order', function() {
-            expect(() => new BPlusTree(filename, 2)).toThrow('B+ tree order must be at least 3');
-            expect(() => new BPlusTree(filename, 1)).toThrow('B+ tree order must be at least 3');
+        it('should throw error for invalid order', async function() {
+            const fileHandle = await getFileHandle(rootDirHandle, getTestFilename(), { create: true });
+            const syncHandle = await fileHandle.createSyncAccessHandle();
+            expect(() => new BPlusTree(syncHandle, 2)).toThrow('B+ tree order must be at least 3');
+            expect(() => new BPlusTree(syncHandle, 1)).toThrow('B+ tree order must be at least 3');
+            await syncHandle.close();
         });
     });
 
     describe('Add and Search', function() {
         let tree;
-        let filename;
 
         beforeEach(async function() {
-            filename = getTestFilename();
-            tree = new BPlusTree(filename, 3);
+            tree = await createTestTree(3);
             await tree.open();
         });
 
@@ -92,7 +99,9 @@ describe.skipIf(!hasOPFS)('BPlusTree', function() {
             if (tree && tree.isOpen) {
                 await tree.close();
             }
-            await cleanupFile(filename);
+            if (tree && tree._testFilename) {
+              await cleanupFile(tree._testFilename);
+            }
         });
 
         it('should add a single key-value pair', async function() {
@@ -190,9 +199,15 @@ describe.skipIf(!hasOPFS)('BPlusTree', function() {
             await tree.add(20, 'twenty');
             await tree.add(5, 'five');
             
+            const filename = tree._testFilename;
             await tree.close();
             
-            tree = new BPlusTree(filename, 3);
+            // Reopen using helper function
+            tree = await createTestTree(3);
+            const fileHandle = await getFileHandle(rootDirHandle, filename, { create: false });
+            const syncHandle = await fileHandle.createSyncAccessHandle();
+            tree = new BPlusTree(syncHandle, 3, rootDirHandle);
+            tree._testFilename = filename;
             await tree.open();
             
             expect(tree.size()).toBe(3);
@@ -204,11 +219,9 @@ describe.skipIf(!hasOPFS)('BPlusTree', function() {
 
     describe('Delete', function() {
         let tree;
-        let filename;
 
         beforeEach(async function() {
-            filename = getTestFilename();
-            tree = new BPlusTree(filename, 3);
+            tree = await createTestTree(3);
             await tree.open();
         });
 
@@ -216,7 +229,9 @@ describe.skipIf(!hasOPFS)('BPlusTree', function() {
             if (tree && tree.isOpen) {
                 await tree.close();
             }
-            await cleanupFile(filename);
+            if (tree && tree._testFilename) {
+              await cleanupFile(tree._testFilename);
+            }
         });
 
         it('should delete a key from tree with single element', async function() {
@@ -281,11 +296,9 @@ describe.skipIf(!hasOPFS)('BPlusTree', function() {
 
     describe('toArray', function() {
         let tree;
-        let filename;
 
         beforeEach(async function() {
-            filename = getTestFilename();
-            tree = new BPlusTree(filename, 3);
+            tree = await createTestTree(3);
             await tree.open();
         });
 
@@ -293,7 +306,9 @@ describe.skipIf(!hasOPFS)('BPlusTree', function() {
             if (tree && tree.isOpen) {
                 await tree.close();
             }
-            await cleanupFile(filename);
+            if (tree && tree._testFilename) {
+              await cleanupFile(tree._testFilename);
+            }
         });
 
         it('should return empty array for empty tree', async function() {
@@ -328,11 +343,9 @@ describe.skipIf(!hasOPFS)('BPlusTree', function() {
 
     describe('Async Iterator', function() {
         let tree;
-        let filename;
 
         beforeEach(async function() {
-            filename = getTestFilename();
-            tree = new BPlusTree(filename, 3);
+            tree = await createTestTree(3);
             await tree.open();
         });
 
@@ -340,7 +353,9 @@ describe.skipIf(!hasOPFS)('BPlusTree', function() {
             if (tree && tree.isOpen) {
                 await tree.close();
             }
-            await cleanupFile(filename);
+            if (tree && tree._testFilename) {
+              await cleanupFile(tree._testFilename);
+            }
         });
 
         it('should iterate empty tree', async function() {
@@ -424,11 +439,9 @@ describe.skipIf(!hasOPFS)('BPlusTree', function() {
 
     describe('rangeSearch', function() {
         let tree;
-        let filename;
 
         beforeEach(async function() {
-            filename = getTestFilename();
-            tree = new BPlusTree(filename, 3);
+            tree = await createTestTree(3);
             await tree.open();
             for (let i = 1; i <= 10; i++) {
                 await tree.add(i, `value${i}`);
@@ -439,7 +452,9 @@ describe.skipIf(!hasOPFS)('BPlusTree', function() {
             if (tree && tree.isOpen) {
                 await tree.close();
             }
-            await cleanupFile(filename);
+            if (tree && tree._testFilename) {
+              await cleanupFile(tree._testFilename);
+            }
         });
 
         it('should find all elements in range', async function() {
@@ -479,28 +494,25 @@ describe.skipIf(!hasOPFS)('BPlusTree', function() {
 
     describe('getHeight', function() {
         let tree;
-        let filename;
-
-        beforeEach(async function() {
-            filename = getTestFilename();
-        });
 
         afterEach(async function() {
             if (tree && tree.isOpen) {
                 await tree.close();
             }
-            await cleanupFile(filename);
+            if (tree && tree._testFilename) {
+              await cleanupFile(tree._testFilename);
+            }
         });
 
         it('should return 0 for single-level tree', async function() {
-            tree = new BPlusTree(filename, 3);
+            tree = await createTestTree(3);
             await tree.open();
             await tree.add(1, 'one');
             expect(await tree.getHeight()).toBe(0);
         });
 
         it('should return correct height for multi-level tree', async function() {
-            tree = new BPlusTree(filename, 3);
+            tree = await createTestTree(3);
             await tree.open();
             // Add enough elements to create multiple levels
             for (let i = 1; i <= 20; i++) {
@@ -512,11 +524,9 @@ describe.skipIf(!hasOPFS)('BPlusTree', function() {
 
     describe('Edge Cases', function() {
         let tree;
-        let filename;
 
         beforeEach(async function() {
-            filename = getTestFilename();
-            tree = new BPlusTree(filename, 3);
+            tree = await createTestTree(3);
             await tree.open();
         });
 
@@ -524,7 +534,9 @@ describe.skipIf(!hasOPFS)('BPlusTree', function() {
             if (tree && tree.isOpen) {
                 await tree.close();
             }
-            await cleanupFile(filename);
+            if (tree && tree._testFilename) {
+              await cleanupFile(tree._testFilename);
+            }
         });
 
         it('should handle negative numbers', async function() {
@@ -562,9 +574,11 @@ describe.skipIf(!hasOPFS)('BPlusTree', function() {
 
         it('should maintain tree properties with higher order', async function() {
             await tree.close();
-            await cleanupFile(filename);
+            if (tree._testFilename) {
+              await cleanupFile(tree._testFilename);
+            }
             
-            tree = new BPlusTree(filename, 5);
+            tree = await createTestTree(5);
             await tree.open();
             
             for (let i = 1; i <= 50; i++) {
@@ -580,11 +594,9 @@ describe.skipIf(!hasOPFS)('BPlusTree', function() {
 
     describe('Stress Tests', function() {
         let tree;
-        let filename;
 
         beforeEach(async function() {
-            filename = getTestFilename();
-            tree = new BPlusTree(filename, 4);
+            tree = await createTestTree(4);
             await tree.open();
         });
 
@@ -592,7 +604,9 @@ describe.skipIf(!hasOPFS)('BPlusTree', function() {
             if (tree && tree.isOpen) {
                 await tree.close();
             }
-            await cleanupFile(filename);
+            if (tree && tree._testFilename) {
+              await cleanupFile(tree._testFilename);
+            }
         });
 
         it('should handle rapid insertions and deletions', async function() {
@@ -631,29 +645,45 @@ describe.skipIf(!hasOPFS)('BPlusTree', function() {
     });
 
     describe('Persistence Tests', function() {
-        let filename;
-
-        beforeEach(function() {
-            filename = getTestFilename();
-        });
+        let testTrees = [];
 
         afterEach(async function() {
-            await cleanupFile(filename);
+            for (const tree of testTrees) {
+                if (tree && tree.isOpen) {
+                    await tree.close();
+                }
+                if (tree && tree._testFilename) {
+                    await cleanupFile(tree._testFilename);
+                }
+            }
+            testTrees = [];
         });
 
         it('should persist data across multiple open/close cycles', async function() {
-            let tree = new BPlusTree(filename, 3);
+            let tree = await createTestTree(3);
+            testTrees.push(tree);
             await tree.open();
             await tree.add(1, 'one');
             await tree.add(2, 'two');
+            const filename = tree._testFilename;
             await tree.close();
 
-            tree = new BPlusTree(filename, 3);
+            // Reopen with same filename
+            const fileHandle = await getFileHandle(rootDirHandle, filename, { create: false });
+            const syncHandle = await fileHandle.createSyncAccessHandle();
+            tree = new BPlusTree(syncHandle, 3);
+            tree._testFilename = filename;
+            testTrees.push(tree);
             await tree.open();
             await tree.add(3, 'three');
             await tree.close();
 
-            tree = new BPlusTree(filename, 3);
+            // Reopen again
+            const fileHandle2 = await getFileHandle(rootDirHandle, filename, { create: false });
+            const syncHandle2 = await fileHandle2.createSyncAccessHandle();
+            tree = new BPlusTree(syncHandle2, 3);
+            tree._testFilename = filename;
+            testTrees.push(tree);
             await tree.open();
             
             expect(tree.size()).toBe(3);
@@ -665,15 +695,22 @@ describe.skipIf(!hasOPFS)('BPlusTree', function() {
         });
 
         it('should persist deletions', async function() {
-            let tree = new BPlusTree(filename, 3);
+            let tree = await createTestTree(3);
+            testTrees.push(tree);
             await tree.open();
             await tree.add(1, 'one');
             await tree.add(2, 'two');
             await tree.add(3, 'three');
             await tree.delete(2);
+            const filename = tree._testFilename;
             await tree.close();
 
-            tree = new BPlusTree(filename, 3);
+            // Reopen
+            const fileHandle = await getFileHandle(rootDirHandle, filename, { create: false });
+            const syncHandle = await fileHandle.createSyncAccessHandle();
+            tree = new BPlusTree(syncHandle, 3);
+            tree._testFilename = filename;
+            testTrees.push(tree);
             await tree.open();
             
             expect(tree.size()).toBe(2);
@@ -687,16 +724,23 @@ describe.skipIf(!hasOPFS)('BPlusTree', function() {
         it('should handle large dataset persistence', async function() {
             const count = 200;
             
-            let tree = new BPlusTree(filename, 4);
+            let tree = await createTestTree(4);
+            testTrees.push(tree);
             await tree.open();
             
             for (let i = 0; i < count; i++) {
                 await tree.add(i, `value${i}`);
             }
             
+            const filename = tree._testFilename;
             await tree.close();
 
-            tree = new BPlusTree(filename, 4);
+            // Reopen
+            const fileHandle = await getFileHandle(rootDirHandle, filename, { create: false });
+            const syncHandle = await fileHandle.createSyncAccessHandle();
+            tree = new BPlusTree(syncHandle, 4);
+            tree._testFilename = filename;
+            testTrees.push(tree);
             await tree.open();
             
             expect(tree.size()).toBe(count);

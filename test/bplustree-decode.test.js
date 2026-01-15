@@ -1,10 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { execFile } from 'child_process';
 import { BPlusTree } from '../src/bplustree.js';
-import { ObjectId, Pointer } from '../src/bjson.js';
+import { ObjectId, Pointer, deleteFile, getFileHandle } from '../src/bjson.js';
 
 // Set up node-opfs for Node.js environment
 let hasOPFS = false;
+let rootDirHandle = null;
+let testFileCounter = 0;
+
 try {
   const nodeOpfs = await import('node-opfs');
   if (nodeOpfs.navigator && typeof global !== 'undefined') {
@@ -18,6 +21,33 @@ try {
 } catch (e) {
   if (typeof navigator !== 'undefined' && navigator.storage && navigator.storage.getDirectory) {
     hasOPFS = true;
+  }
+}
+
+if (hasOPFS) {
+  beforeAll(async () => {
+    if (navigator.storage && navigator.storage.getDirectory) {
+      rootDirHandle = await navigator.storage.getDirectory();
+    }
+  });
+}
+
+function getTestFilename() {
+  return `test-bplustree-decode-${Date.now()}-${testFileCounter++}.bjson`;
+}
+
+async function createTestTree(order = 3) {
+  const filename = getTestFilename();
+  const fileHandle = await getFileHandle(rootDirHandle, filename, { create: true });
+  const syncHandle = await fileHandle.createSyncAccessHandle();
+  const tree = new BPlusTree(syncHandle, order, rootDirHandle);
+  tree._testFilename = filename;
+  return tree;
+}
+
+async function cleanupFile(filename) {
+  if (rootDirHandle) {
+    await deleteFile(rootDirHandle, filename);
   }
 }
 
@@ -37,11 +67,9 @@ function runCli(filePath) {
 
 describe.skipIf(!hasOPFS)('bplustree-decode CLI', () => {
   it('decodes and prints B+ tree with various types', async () => {
-    const filename = 'test-bplustree-decode-cli.bjson';
-    
-    // Create and populate tree
-    const tree = new BPlusTree(filename, 3);
+    const tree = await createTestTree(3);
     await tree.open();
+    const filename = tree._testFilename;
     
     const oid1 = new ObjectId('5f1d7f3a0b0c0d0e0f101112');
     const oid2 = new ObjectId('6a6b6c6d6e6f707172737475');
@@ -57,6 +85,9 @@ describe.skipIf(!hasOPFS)('bplustree-decode CLI', () => {
     
     // Run CLI tool
     const { stdout } = await runCli(filename);
+    
+    // Clean up after CLI
+    await cleanupFile(filename);
     
     // Check output contains expected formatting
     expect(stdout).toContain('B+ tree contains 4 entries');
@@ -82,25 +113,24 @@ describe.skipIf(!hasOPFS)('bplustree-decode CLI', () => {
   });
 
   it('handles empty B+ tree', async () => {
-    const filename = 'test-bplustree-decode-empty.bjson';
-    
-    // Create empty tree
-    const tree = new BPlusTree(filename, 3);
+    const tree = await createTestTree(3);
     await tree.open();
+    const filename = tree._testFilename;
     await tree.close();
     
     // Run CLI tool
     const { stdout } = await runCli(filename);
     
+    // Clean up after CLI
+    await cleanupFile(filename);
+    
     expect(stdout).toContain('B+ tree is empty');
   });
 
   it('displays entries in sorted key order', async () => {
-    const filename = 'test-bplustree-decode-sorted.bjson';
-    
-    // Create tree with unsorted insertions
-    const tree = new BPlusTree(filename, 3);
+    const tree = await createTestTree(3);
     await tree.open();
+    const filename = tree._testFilename;
     
     await tree.add(5, 'five');
     await tree.add(2, 'two');
@@ -112,6 +142,9 @@ describe.skipIf(!hasOPFS)('bplustree-decode CLI', () => {
     
     // Run CLI tool
     const { stdout } = await runCli(filename);
+    
+    // Clean up after CLI
+    await cleanupFile(filename);
     
     expect(stdout).toContain('B+ tree contains 5 entries');
     

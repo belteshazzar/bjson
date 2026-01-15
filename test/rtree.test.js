@@ -37,29 +37,50 @@ if (hasOPFS) {
   });
 }
 
-async function cleanup() {
-    if (rootDirHandle) {
-      await deleteFile(rootDirHandle, 'test-rtree.bjson');
-    }
+let testFileCounter = 0;
+
+function getTestFilename() {
+  return `test-rtree-${Date.now()}-${testFileCounter++}.bjson`;
+}
+
+async function createTestTree(order = 4) {
+  const filename = getTestFilename();
+  const fileHandle = await getFileHandle(rootDirHandle, filename, { create: true });
+  const syncHandle = await fileHandle.createSyncAccessHandle();
+  const tree = new RTree(syncHandle, order);
+  tree._testFilename = filename;
+  return tree;
+}
+
+async function reopenTree(filename, order = 4) {
+  const fileHandle = await getFileHandle(rootDirHandle, filename, { create: false });
+  const syncHandle = await fileHandle.createSyncAccessHandle();
+  const tree = new RTree(syncHandle, order);
+  tree._testFilename = filename;
+  return tree;
+}
+
+async function cleanupFile(filename) {
+  if (rootDirHandle) {
+    await deleteFile(rootDirHandle, filename);
+  }
 }
 
 describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
-  afterEach(async () => {
-    await cleanup();
-  });
 
   it('should create and open new tree', async () => {
-    const tree = new RTree('test-rtree.bjson', 4);
+    const tree = await createTestTree(4);
     await tree.open();
 
     expect(tree.size()).toBe(0);
     expect(tree.isOpen).toBe(true);
 
     await tree.close();
+    await cleanupFile(tree._testFilename);
   });
 
   it('should insert points', async () => {
-    const tree = new RTree('test-rtree.bjson', 4);
+    const tree = await createTestTree(4);
     await tree.open();
 
     const id1 = new ObjectId();
@@ -73,19 +94,20 @@ describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
     expect(tree.size()).toBe(3);
 
     await tree.close();
+    await cleanupFile(tree._testFilename);
   });
 
   it('should search by bounding box', async () => {
-    const tree = new RTree('test-rtree.bjson', 4);
+    const tree = await createTestTree(4);
     await tree.open();
 
     const idNY = new ObjectId();
     const idLA = new ObjectId();
     const idCH = new ObjectId();
     
-    tree.insert(40.7128, -74.0060, idNY);
-    tree.insert(34.0522, -118.2437, idLA);
-    tree.insert(41.8781, -87.6298, idCH);
+    await tree.insert(40.7128, -74.0060, idNY);
+    await tree.insert(34.0522, -118.2437, idLA);
+    await tree.insert(41.8781, -87.6298, idCH);
 
     const bbox = {
       minLat: 40,
@@ -101,10 +123,11 @@ describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
     expect(results[0].lng).toBeCloseTo(-74.0060);
 
     await tree.close();
+    await cleanupFile(tree._testFilename);
   });
 
   it('should search by radius', async () => {
-    const tree = new RTree('test-rtree.bjson', 4);
+    const tree = await createTestTree(4);
     await tree.open();
 
     const idNY = new ObjectId();
@@ -129,28 +152,30 @@ describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
     expect(largeIds).toContainEqual(idCH);
 
     await tree.close();
+    await cleanupFile(tree._testFilename);
   });
 
   it('should persist and reopen tree', async () => {
     // Create and insert
-    const tree1 = new RTree('test-rtree.bjson', 4);
-    await tree1.open();
+    let tree = await createTestTree(4);
+    const filename = tree._testFilename;
+    await tree.open();
 
     const idNY = new ObjectId();
     const idLA = new ObjectId();
     const idCH = new ObjectId();
     
-    await tree1.insert(40.7128, -74.0060, idNY);
-    await tree1.insert(34.0522, -118.2437, idLA);
-    await tree1.insert(41.8781, -87.6298, idCH);
+    await tree.insert(40.7128, -74.0060, idNY);
+    await tree.insert(34.0522, -118.2437, idLA);
+    await tree.insert(41.8781, -87.6298, idCH);
 
-    await tree1.close();
-    expect(tree1.isOpen).toBe(false);
+    await tree.close();
+    expect(tree.isOpen).toBe(false);
 
     // Reopen and verify
-    const tree2 = new RTree('test-rtree.bjson');
-    await tree2.open();
-    expect(tree2.size()).toBe(3);
+    tree = await reopenTree(filename, 4);
+    await tree.open();
+    expect(tree.size()).toBe(3);
 
     const bbox = {
       minLat: 40,
@@ -159,15 +184,16 @@ describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
       maxLng: -73
     };
 
-    const results = await tree2.searchBBox(bbox);
+    const results = await tree.searchBBox(bbox);
     expect(results).toHaveLength(1);
     expect(results[0].objectId).toEqual(idNY);
 
-    await tree2.close();
+    await tree.close();
+    await cleanupFile(tree._testFilename);
   });
 
   it('should handle node splitting with 8 entries', async () => {
-    const tree = new RTree('test-rtree.bjson', 4);
+    const tree = await createTestTree(4);
     await tree.open();
 
     // Insert cities to force splits
@@ -200,10 +226,11 @@ describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
     expect(allResults).toHaveLength(8);
 
     await tree.close();
+    await cleanupFile(tree._testFilename);
   });
 
   it('should clear tree', async () => {
-    const tree = new RTree('test-rtree.bjson', 4);
+    const tree = await createTestTree(4);
     await tree.open();
 
     const id1 = new ObjectId();
@@ -225,10 +252,11 @@ describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
     expect(results).toHaveLength(0);
 
     await tree.close();
+    await cleanupFile(tree._testFilename);
   });
 
   it('should remove a single entry', async () => {
-    const tree = new RTree('test-rtree.bjson', 4);
+    const tree = await createTestTree(4);
     await tree.open();
 
     const id1 = new ObjectId();
@@ -261,10 +289,11 @@ describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
     expect(idsAfterRemoval).not.toContainEqual(id2);
 
     await tree.close();
+    await cleanupFile(tree._testFilename);
   });
 
   it('should return false when removing non-existent entry', async () => {
-    const tree = new RTree('test-rtree.bjson', 4);
+    const tree = await createTestTree(4);
     await tree.open();
 
     const id1 = new ObjectId();
@@ -278,10 +307,11 @@ describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
     expect(tree.size()).toBe(1);
 
     await tree.close();
+    await cleanupFile(tree._testFilename);
   });
 
   it('should remove all entries one by one', async () => {
-    const tree = new RTree('test-rtree.bjson', 4);
+    const tree = await createTestTree(4);
     await tree.open();
 
     const ids = [];
@@ -317,10 +347,11 @@ describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
     expect(results).toHaveLength(0);
 
     await tree.close();
+    await cleanupFile(tree._testFilename);
   });
 
   it('should handle removal causing node underflow and merging', async () => {
-    const tree = new RTree('test-rtree.bjson', 4);
+    const tree = await createTestTree(4);
     await tree.open();
 
     // Insert enough entries to force splits, creating internal nodes
@@ -369,10 +400,11 @@ describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
     }
 
     await tree.close();
+    await cleanupFile(tree._testFilename);
   });
 
   it('should maintain tree integrity after mixed insertions and removals', async () => {
-    const tree = new RTree('test-rtree.bjson', 4);
+    const tree = await createTestTree(4);
     await tree.open();
 
     const cities = [
@@ -424,12 +456,14 @@ describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
     expect(mixedIds).toContainEqual(ids[4]); // Fifth entry
 
     await tree.close();
+    await cleanupFile(tree._testFilename);
   });
 
   it('should handle removal in persisted tree', async () => {
     // Create and insert
-    const tree1 = new RTree('test-rtree.bjson', 4);
-    await tree1.open();
+    let tree = await createTestTree(4);
+    const filename = tree._testFilename;
+    await tree.open();
 
     const ids = [];
     const cities = [
@@ -442,30 +476,30 @@ describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
     for (const city of cities) {
       const id = new ObjectId();
       ids.push(id);
-      await tree1.insert(city.lat, city.lng, id);
+      await tree.insert(city.lat, city.lng, id);
     }
 
-    await tree1.close();
+    await tree.close();
 
     // Reopen and remove
-    const tree2 = new RTree('test-rtree.bjson');
-    await tree2.open();
+    tree = await reopenTree(filename, 4);
+    await tree.open();
     
-    expect(tree2.size()).toBe(4);
+    expect(tree.size()).toBe(4);
     
-    const removed = await tree2.remove(ids[1]);
+    const removed = await tree.remove(ids[1]);
     expect(removed).toBe(true);
-    expect(tree2.size()).toBe(3);
+    expect(tree.size()).toBe(3);
 
-    await tree2.close();
+    await tree.close();
 
     // Reopen again and verify
-    const tree3 = new RTree('test-rtree.bjson');
-    await tree3.open();
+    tree = await reopenTree(filename, 4);
+    await tree.open();
     
-    expect(tree3.size()).toBe(3);
+    expect(tree.size()).toBe(3);
 
-    const results = await tree3.searchBBox({
+    const results = await tree.searchBBox({
       minLat: 25,
       maxLat: 50,
       minLng: -125,
@@ -479,6 +513,7 @@ describe.skipIf(!hasOPFS)('On-Disk R-tree Implementation', () => {
     expect(persistedIds).toContainEqual(ids[2]);
     expect(persistedIds).toContainEqual(ids[3]);
 
-    await tree3.close();
+    await tree.close();
+    await cleanupFile(tree._testFilename);
   });
 });

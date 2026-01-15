@@ -45,21 +45,17 @@ class NodeData {
 export class BPlusTree {
     /**
      * Creates a new persistent B+ tree
-     * @param {string} filename - Path to storage file
+     * @param {FileSystemSyncAccessHandle} syncHandle - Sync access handle to storage file
      * @param {number} order - Tree order (default: 3)
      */
-    constructor(filename, order = 3) {
+    constructor(syncHandle, order = 3) {
         if (order < 3) {
             throw new Error('B+ tree order must be at least 3');
         }
-        this.filename = filename;
+        this.file = new BJsonFile(syncHandle);
         this.order = order;
         this.minKeys = Math.ceil(order / 2) - 1;
         
-        // OPFS handles
-        this.dirHandle = null;
-        this.fileHandle = null;
-        this.file = null;
         this.isOpen = false;
         
         // Metadata
@@ -69,34 +65,16 @@ export class BPlusTree {
     }
 
     /**
-     * Open the tree file (create if doesn't exist)
+     * Open the tree (load or initialize metadata)
      */
     async open() {
         if (this.isOpen) {
-            throw new Error('Tree file is already open');
+            throw new Error('Tree is already open');
         }
 
-        // Get OPFS directory
-        if (!navigator.storage || !navigator.storage.getDirectory) {
-            throw new Error('Origin Private File System (OPFS) is not supported in this browser');
-        }
-        this.dirHandle = await navigator.storage.getDirectory();
-
-        // Check if file exists
-        let exists = false;
-        try {
-            this.fileHandle = await getFileHandle(this.dirHandle, this.filename);
-            exists = true;
-        } catch (error) {
-            if (error.name !== 'NotFoundError') {
-                throw error;
-            }
-        }
-
-        // Get or create file handle
-        this.fileHandle = await getFileHandle(this.dirHandle, this.filename, { create: true });
-        const syncHandle = await this.fileHandle.createSyncAccessHandle();
-        this.file = new BJsonFile(syncHandle);
+        // Check if file has content
+        const fileSize = this.file.getFileSize();
+        const exists = fileSize > 0;
 
         if (exists) {
             this._loadMetadata();
@@ -108,7 +86,7 @@ export class BPlusTree {
     }
 
     /**
-     * Close the tree file and save metadata
+     * Close the tree and save metadata
      */
     async close() {
         if (this.isOpen) {
@@ -116,9 +94,6 @@ export class BPlusTree {
                 this.file.flush();
                 await this.file.syncAccessHandle.close();
             }
-            this.file = null;
-            this.fileHandle = null;
-            this.dirHandle = null;
             this.isOpen = false;
         }
     }
@@ -559,17 +534,17 @@ export class BPlusTree {
     }
 
     /**
-     * Compact the tree into a new file by copying only the current live nodes.
+     * Compact the tree by copying all live entries into a new file.
      * Returns size metrics so callers can see how much space was reclaimed.
-     * @param {string} destinationFilename - New file to write the compacted tree into
-     * @returns {Promise<{oldSize:number,newSize:number,bytesSaved:number,newFilename:string}>}
+     * @param {FileSystemSyncAccessHandle} destSyncHandle - Sync handle for destination file
+     * @returns {Promise<{oldSize:number,newSize:number,bytesSaved:number}>}
      */
-    async compact(destinationFilename) {
+    async compact(destSyncHandle) {
         if (!this.isOpen) {
             throw new Error('Tree file is not open');
         }
-        if (!destinationFilename) {
-            throw new Error('Destination filename is required for compaction');
+        if (!destSyncHandle) {
+            throw new Error('Destination sync handle is required for compaction');
         }
 
         // Make sure the current file has up-to-date metadata before measuring size
@@ -577,24 +552,22 @@ export class BPlusTree {
 
         // Rebuild a fresh tree with only the live entries
         const entries = this.toArray();
-        const newTree = new BPlusTree(destinationFilename, this.order);
+        
+        const newTree = new BPlusTree(destSyncHandle, this.order);
         await newTree.open();
         for (const entry of entries) {
-            newTree.add(entry.key, entry.value);
+            await newTree.add(entry.key, entry.value);
         }
+        
+        // Measure new file size before closing
+        const newSize = newTree.file.getFileSize();
+        
         await newTree.close();
-
-        // Measure new file size after metadata has been written on close
-        const destFileHandle = await getFileHandle(this.dirHandle, destinationFilename);
-        const destSyncHandle = await destFileHandle.createSyncAccessHandle();
-        const newSize = destSyncHandle.getSize();
-        await destSyncHandle.close();
 
         return {
             oldSize,
             newSize,
-            bytesSaved: Math.max(0, oldSize - newSize),
-            newFilename: destinationFilename
+            bytesSaved: Math.max(0, oldSize - newSize)
         };
     }
 }

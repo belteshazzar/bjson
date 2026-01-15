@@ -35,6 +35,29 @@ if (hasOPFS) {
   });
 }
 
+let testFileCounter = 0;
+
+function getTestFilename() {
+  return `test-rtree-persistence-${Date.now()}-${testFileCounter++}.bjson`;
+}
+
+async function createTestTree(order = 4) {
+  const filename = getTestFilename();
+  const fileHandle = await getFileHandle(rootDirHandle, filename, { create: true });
+  const syncHandle = await fileHandle.createSyncAccessHandle();
+  const tree = new RTree(syncHandle, order);
+  tree._testFilename = filename;
+  return tree;
+}
+
+async function reopenTree(filename, order = 4) {
+  const fileHandle = await getFileHandle(rootDirHandle, filename, { create: false });
+  const syncHandle = await fileHandle.createSyncAccessHandle();
+  const tree = new RTree(syncHandle, order);
+  tree._testFilename = filename;
+  return tree;
+}
+
 async function cleanupFile(filename) {
     if (rootDirHandle) {
       await deleteFile(rootDirHandle, filename);
@@ -42,17 +65,17 @@ async function cleanupFile(filename) {
 }
 
 describe.skipIf(!hasOPFS)('RTree Persistence', () => {
-  const filename = 'test-rtree-persistence.bjson';
 
   afterEach(async () => {
-    await cleanupFile(filename);
+    // Cleanup happens within each test
   });
 
   it('should persist and reload a single point', async () => {
     const id = new ObjectId();
 
     // Create and populate tree
-    let tree = new RTree(filename, 4);
+    let tree = await createTestTree(4);
+    const filename = tree._testFilename;
     await tree.open();
     
     tree.insert(40.7128, -74.0060, id);
@@ -61,7 +84,7 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
     await tree.close();
 
     // Reopen and verify
-    tree = new RTree(filename, 4);
+    tree = await reopenTree(filename, 4);
     await tree.open();
     
     expect(tree.size()).toBe(1);
@@ -91,7 +114,8 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
     ];
 
     // Create and populate tree
-    let tree = new RTree(filename, 4);
+    let tree = await createTestTree(4);
+    const filename = tree._testFilename;
     await tree.open();
     
     for (const point of points) {
@@ -102,7 +126,7 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
     await tree.close();
 
     // Reopen and verify all points
-    tree = new RTree(filename, 4);
+    tree = await reopenTree(filename, 4);
     await tree.open();
     
     expect(tree.size()).toBe(points.length);
@@ -138,7 +162,8 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
     const id3 = new ObjectId();
 
     // Create and populate tree
-    let tree = new RTree(filename, 4);
+    let tree = await createTestTree(4);
+    const filename = tree._testFilename;
     await tree.open();
     
     tree.insert(40.7128, -74.0060, id1); // NYC
@@ -148,7 +173,7 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
     await tree.close();
 
     // Reopen and verify bounding box queries
-    tree = new RTree(filename, 4);
+    tree = await reopenTree(filename, 4);
     await tree.open();
     
     // Query for northeastern US
@@ -171,7 +196,8 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
     const idPA = new ObjectId();
 
     // Create and populate tree with points near NYC
-    let tree = new RTree(filename, 4);
+    let tree = await createTestTree(4);
+    const filename = tree._testFilename;
     await tree.open();
     
     tree.insert(40.7128, -74.0060, idNY);  // NYC
@@ -181,7 +207,7 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
     await tree.close();
 
     // Reopen and verify radius search
-    tree = new RTree(filename, 4);
+    tree = await reopenTree(filename, 4);
     await tree.open();
     
     expect(tree.size()).toBe(3);
@@ -210,7 +236,8 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
     }
 
     // Create and populate tree
-    let tree = new RTree(filename, 4);
+    let tree = await createTestTree(4);
+    const filename = tree._testFilename;
     await tree.open();
     
     for (const point of points) {
@@ -221,7 +248,7 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
     await tree.close();
 
     // Reopen and verify
-    tree = new RTree(filename, 4);
+    tree = await reopenTree(filename, 4);
     await tree.open();
     
     expect(tree.size()).toBe(count);
@@ -246,7 +273,8 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
     const id4 = new ObjectId();
 
     // First cycle: add initial points
-    let tree = new RTree(filename, 4);
+    let tree = await createTestTree(4);
+    const filename = tree._testFilename;
     await tree.open();
     
     tree.insert(40.7128, -74.0060, id1); // NYC
@@ -255,7 +283,7 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
     await tree.close();
 
     // Second cycle: verify and add more points
-    tree = new RTree(filename, 4);
+    tree = await reopenTree(filename, 4);
     await tree.open();
     
     expect(tree.size()).toBe(2);
@@ -275,7 +303,7 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
     await tree.close();
 
     // Third cycle: verify all points
-    tree = new RTree(filename, 4);
+    tree = await reopenTree(filename, 4);
     await tree.open();
     
     expect(tree.size()).toBe(4);
@@ -298,7 +326,8 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
     const id3 = new ObjectId();
 
     // Create and populate tree
-    let tree = new RTree(filename, 4);
+    let tree = await createTestTree(4);
+    const filename = tree._testFilename;
     await tree.open();
     
     tree.insert(40.7128, -74.0060, id1);
@@ -314,7 +343,7 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
     await tree.close();
 
     // Reopen and verify deletion persisted
-    tree = new RTree(filename, 4);
+    tree = await reopenTree(filename, 4);
     await tree.open();
     
     expect(tree.size()).toBe(2);
@@ -353,8 +382,9 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
     }
 
     // Create and populate tree with custom maxEntries
-    let tree = new RTree(filename, maxEntries);
+    let tree = await createTestTree(maxEntries);
     await tree.open();
+    const filename = tree._testFilename;
     
     for (let i = 0; i < count; i++) {
       const lat = 25 + Math.random() * 24;
@@ -367,7 +397,7 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
     await tree.close();
 
     // Reopen and verify tree maintains structure
-    tree = new RTree(filename, maxEntries);
+    tree = await reopenTree(filename, maxEntries);
     await tree.open();
     
     expect(tree.maxEntries).toBe(maxEntries);
@@ -391,7 +421,8 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
     const id2 = new ObjectId();
 
     // Create and populate tree
-    let tree = new RTree(filename, 4);
+    let tree = await createTestTree(4);
+    const filename = tree._testFilename;
     await tree.open();
     
     tree.insert(40.7128, -74.0060, id1);
@@ -406,7 +437,7 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
     await tree.close();
 
     // Reopen and verify empty
-    tree = new RTree(filename, 4);
+    tree = await reopenTree(filename, 4);
     await tree.open();
     
     expect(tree.size()).toBe(0);
@@ -431,7 +462,8 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
     ];
 
     // Create and populate tree
-    let tree = new RTree(filename, 4);
+    let tree = await createTestTree(4);
+    const filename = tree._testFilename;
     await tree.open();
     
     for (const point of midwestPoints) {
@@ -441,7 +473,7 @@ describe.skipIf(!hasOPFS)('RTree Persistence', () => {
     await tree.close();
 
     // Reopen and test overlapping queries
-    tree = new RTree(filename, 4);
+    tree = await reopenTree(filename, 4);
     await tree.open();
     
     expect(tree.size()).toBe(3);

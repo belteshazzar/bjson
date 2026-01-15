@@ -69,6 +69,14 @@ function generateLocationWithId(index) {
   };
 }
 
+async function createSoakTestTree() {
+  const filename = 'test-rtree-soak.bjson';
+  const fileHandle = await getFileHandle(rootDirHandle, filename, { create: true });
+  const syncHandle = await fileHandle.createSyncAccessHandle();
+  const tree = new RTree(syncHandle, 4);
+  return tree;
+}
+
 /**
  * Print timing report
  */
@@ -93,7 +101,7 @@ describe.skipIf(!hasOPFS)('R-tree Soak Tests', { timeout: 30000 }, () => {
   });
 
   it('should benchmark small insertions with timing', async () => {
-    const tree = new RTree('test-rtree-soak.bjson', 4);
+    const tree = await createSoakTestTree();
     await tree.open();
 
     const count = 8;
@@ -124,7 +132,7 @@ describe.skipIf(!hasOPFS)('R-tree Soak Tests', { timeout: 30000 }, () => {
   });
 
   it('should benchmark insertions and queries on small dataset', async () => {
-    const tree = new RTree('test-rtree-soak.bjson', 4);
+    const tree = await createSoakTestTree();
     await tree.open();
 
     const insertCount = 8;
@@ -183,7 +191,7 @@ describe.skipIf(!hasOPFS)('R-tree Soak Tests', { timeout: 30000 }, () => {
   });
 
   it('should benchmark insertions and radius searches', async () => {
-    const tree = new RTree('test-rtree-soak.bjson', 4);
+    const tree = await createSoakTestTree();
     await tree.open();
 
     const insertCount = 8;
@@ -239,7 +247,7 @@ describe.skipIf(!hasOPFS)('R-tree Soak Tests', { timeout: 30000 }, () => {
   });
 
   it('should measure insert latency distribution', async () => {
-    const tree = new RTree('test-rtree-soak.bjson', 4);
+    const tree = await createSoakTestTree();
     await tree.open();
 
     const insertCount = 8;
@@ -285,7 +293,7 @@ describe.skipIf(!hasOPFS)('R-tree Soak Tests', { timeout: 30000 }, () => {
   });
 
   it('should measure query performance', async () => {
-    const tree = new RTree('test-rtree-soak.bjson', 4);
+    const tree = await createSoakTestTree();
     await tree.open();
 
     const insertCount = 8;
@@ -352,7 +360,7 @@ describe.skipIf(!hasOPFS)('R-tree Soak Tests', { timeout: 30000 }, () => {
   });
 
   it.skipIf(isBrowser)('should measure memory usage', async () => {
-    const tree = new RTree('test-rtree-soak.bjson', 4);
+    const tree = await createSoakTestTree();
     await tree.open();
 
     const startMemory = process.memoryUsage();

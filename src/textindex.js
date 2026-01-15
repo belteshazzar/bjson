@@ -1,5 +1,6 @@
 import { stemmer } from 'stemmer';
 import { BPlusTree } from './bplustree.js';
+import { getFileHandle } from './bjson.js';
 
 // Common English stop words that don't add semantic value to searches
 const STOPWORDS = new Set([
@@ -44,21 +45,24 @@ export function tokenize(text) {
 export class TextIndex {
   constructor(options = {}) {
     const {
-      baseFilename = `text-index-${Date.now()}-${Math.random().toString(16).slice(2)}`,
       order = 16,
       trees
     } = options;
 
-    this.baseFilename = baseFilename;
-    this.index = trees?.index || new BPlusTree(`${baseFilename}-terms.bjson`, order);
-    this.documentTerms = trees?.documentTerms || new BPlusTree(`${baseFilename}-documents.bjson`, order);
-    this.documentLengths = trees?.documentLengths || new BPlusTree(`${baseFilename}-lengths.bjson`, order);
+    this.order = order;
+    this.index = trees?.index || null;
+    this.documentTerms = trees?.documentTerms || null;
+    this.documentLengths = trees?.documentLengths || null;
     this.isOpen = false;
   }
 
   async open() {
     if (this.isOpen) {
       throw new Error('TextIndex is already open');
+    }
+
+    if (!this.index || !this.documentTerms || !this.documentLengths) {
+      throw new Error('Trees must be initialized before opening');
     }
 
     await Promise.all([
@@ -293,44 +297,36 @@ export class TextIndex {
   }
 
   /**
-   * Compact all internal B+ trees into new files and switch the index to use them.
-   * @param {string} destinationBase - Base filename (without suffixes) for the compacted files
+   * Compact all internal B+ trees using provided destination tree instances.
+   * The destination trees should be freshly created (unopened) with new sync handles.
+   * After compaction completes, the destination sync handles will be closed.
+   * @param {Object} options - Compaction options  
+   * @param {BPlusTree} options.index - Fresh destination tree for index data
+   * @param {BPlusTree} options.documentTerms - Fresh destination tree for document terms
+   * @param {BPlusTree} options.documentLengths - Fresh destination tree for document lengths
    * @returns {Promise<{terms: object, documents: object, lengths: object}>}
    */
-  async compact(destinationBase = `${this.baseFilename}-compact-${Date.now()}`) {
+  async compact({ index: destIndex, documentTerms: destDocTerms, documentLengths: destDocLengths }) {
     this._ensureOpen();
 
-    if (!destinationBase) {
-      throw new Error('Destination base filename is required for compaction');
+    if (!destIndex || !destDocTerms || !destDocLengths) {
+      throw new Error('Destination trees must be provided for compaction');
     }
 
-    const termsDest = `${destinationBase}-terms.bjson`;
-    const documentsDest = `${destinationBase}-documents.bjson`;
-    const lengthsDest = `${destinationBase}-lengths.bjson`;
+    // Compact the trees. Note: BPlusTree.compact() will close the destination sync handle
+    // when finished, so these destination trees should be disposable after this call
+    const termsResult = await this.index.compact(destIndex.file.syncAccessHandle);
+    const documentsResult = await this.documentTerms.compact(destDocTerms.file.syncAccessHandle);
+    const lengthsResult = await this.documentLengths.compact(destDocLengths.file.syncAccessHandle);
 
-    const results = await Promise.all([
-      this.index.compact(termsDest),
-      this.documentTerms.compact(documentsDest),
-      this.documentLengths.compact(lengthsDest)
-    ]);
-
-    const indexOrder = this.index.order;
-    const documentsOrder = this.documentTerms.order;
-    const lengthsOrder = this.documentLengths.order;
-
+    // Close the old trees - now the index is closed
     await this.close();
-
-    this.baseFilename = destinationBase;
-    this.index = new BPlusTree(termsDest, indexOrder);
-    this.documentTerms = new BPlusTree(documentsDest, documentsOrder);
-    this.documentLengths = new BPlusTree(lengthsDest, lengthsOrder);
-
-    await this.open();
+    this.isOpen = false;
 
     return {
-      terms: results[0],
-      documents: results[1],
-      lengths: results[2]
+      terms: termsResult,
+      documents: documentsResult,
+      lengths: lengthsResult
     };
   }
 
