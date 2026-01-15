@@ -8,6 +8,7 @@
  */
 
 import { TextLog } from './src/textlog.js';
+import { getFileHandle, deleteFile } from './src/bjson.js';
 
 // Set up node-opfs for Node.js environment
 async function setupOPFS() {
@@ -32,8 +33,13 @@ async function main() {
 
   console.log('TextLog Example\n');
 
+  // Get OPFS directory and create/open file
+  const dirHandle = await navigator.storage.getDirectory();
+  const fileHandle = await getFileHandle(dirHandle, 'example-textlog.bjson', { create: true });
+  const syncHandle = await fileHandle.createSyncAccessHandle();
+
   // Create a new TextLog with 3 diffs between snapshots
-  const log = new TextLog('example-textlog.bjson', 3);
+  const log = new TextLog(syncHandle, 3);
   await log.open();
 
   console.log('Adding versions...\n');
@@ -95,6 +101,8 @@ Our hero sets out on an epic journey.`;
   console.log(`Current version: ${log.getCurrentVersion()}`);
 
   await log.close();
+  await syncHandle.close();
+  await deleteFile(dirHandle, 'example-textlog.bjson');
   console.log('\nTextLog closed successfully');
 }
 
